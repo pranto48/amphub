@@ -1,5 +1,6 @@
 import * as React from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { z } from "zod";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -7,15 +8,27 @@ import {
   Power, Maximize2, Keyboard, Loader2, ShieldAlert,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/lib/auth-context";
 
-export const Route = createFileRoute("/_authenticated/nodes/$id/session")({ component: RemoteSession });
+export const Route = createFileRoute("/_authenticated/nodes/$id/session")({
+  validateSearch: z.object({
+    local: z.coerce.boolean().optional(),
+    requestId: z.string().uuid().optional(),
+  }),
+  component: RemoteSession,
+});
 
 function RemoteSession() {
   const { id } = Route.useParams();
+  const search = Route.useSearch();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [name, setName] = React.useState("");
   const [loading, setLoading] = React.useState(true);
+  const [authorized, setAuthorized] = React.useState(false);
+  const [authChecked, setAuthChecked] = React.useState(false);
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const canvasRef = React.useRef<HTMLCanvasElement>(null);
 
   React.useEffect(() => {
     supabase.from("desktop_nodes").select("name,remote_id,local_ip,os").eq("id", id).maybeSingle().then(({ data }) => {
@@ -23,6 +36,62 @@ function RemoteSession() {
       setLoading(false);
     });
   }, [id]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    async function checkAccess() {
+      if (search.local) {
+        if (!cancelled) {
+          setAuthorized(true);
+          setAuthChecked(true);
+        }
+        return;
+      }
+      if (!user || !search.requestId) {
+        if (!cancelled) {
+          setAuthorized(false);
+          setAuthChecked(true);
+        }
+        return;
+      }
+      const { data } = await supabase
+        .from("access_requests")
+        .select("id,status,expires_at")
+        .eq("id", search.requestId)
+        .eq("node_id", id)
+        .eq("requester_id", user.id)
+        .maybeSingle();
+      const ok = !!data && data.status === "approved" && (!!data.expires_at ? new Date(data.expires_at).getTime() > Date.now() : false);
+      if (!cancelled) {
+        setAuthorized(ok);
+        setAuthChecked(true);
+      }
+    }
+    checkAccess();
+    return () => { cancelled = true; };
+  }, [id, search.local, search.requestId, user]);
+
+  React.useEffect(() => {
+    if (!authorized) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    canvas.width = 1280;
+    canvas.height = 720;
+    ctx.fillStyle = "#07090f";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#1f2937";
+    ctx.fillRect(48, 48, canvas.width - 96, canvas.height - 96);
+    ctx.fillStyle = "#7dd3fc";
+    ctx.font = "600 24px Inter, system-ui, sans-serif";
+    ctx.fillText("Secure Remote Session", 90, 110);
+    ctx.fillStyle = "#a1a1aa";
+    ctx.font = "16px ui-monospace, SFMono-Regular, Menlo, monospace";
+    ctx.fillText(`Node: ${name}`, 90, 150);
+    ctx.fillText(`Transport: ${search.local ? "LAN Direct" : "Approval-Gated Remote Token"}`, 90, 176);
+    ctx.fillText("Streaming pipeline placeholder (WebRTC/RDP/VNC bridge)", 90, 204);
+  }, [authorized, name, search.local]);
 
   function fullscreen() {
     const el = containerRef.current;
@@ -40,7 +109,14 @@ function RemoteSession() {
     navigate({ to: "/" });
   }
 
-  if (loading) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;
+  if (loading || !authChecked) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;
+  if (!authorized) {
+    return (
+      <Card className="p-8 text-center text-sm text-muted-foreground">
+        Session denied: this route requires LAN mode or an approved, non-expired request token.
+      </Card>
+    );
+  }
 
   return (
     <div className="space-y-3">
@@ -49,7 +125,7 @@ function RemoteSession() {
           <h1 className="text-lg font-semibold">{name}</h1>
           <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">live remote session</div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 justify-end">
           <Button size="sm" variant="outline" onClick={sendCAD}><Keyboard className="size-4" /> Ctrl+Alt+Del</Button>
           <Button size="sm" variant="outline" onClick={fullscreen}><Maximize2 className="size-4" /> Fullscreen</Button>
           <Button size="sm" variant="destructive" onClick={disconnect}><Power className="size-4" /> Disconnect</Button>
@@ -58,7 +134,8 @@ function RemoteSession() {
 
       <Card ref={containerRef} className="relative overflow-hidden border-primary/30 p-0">
         <div className="viewer-grid relative aspect-video w-full bg-background">
-          <div className="absolute inset-0 flex items-center justify-center">
+          <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
+          <div className="absolute inset-0 flex items-center justify-center bg-background/45">
             <div className="rounded-lg border border-border bg-background/80 px-6 py-5 text-center backdrop-blur">
               <ShieldAlert className="mx-auto size-8 text-warning" />
               <div className="mt-3 text-sm font-semibold">Streaming agent not connected</div>

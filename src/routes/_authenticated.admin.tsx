@@ -53,7 +53,7 @@ function AdminPanel() {
       .channel("admin-requests")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "access_requests" }, (payload) => {
         const r = payload.new as ReqRow;
-        toast.warning("New access request", { description: `Requester awaiting approval` });
+        toast.warning("New access request", { description: `Node ${r.node_id.slice(0, 8)} awaiting approval` });
         setPending((p) => [r, ...p]);
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "access_requests" }, () => load())
