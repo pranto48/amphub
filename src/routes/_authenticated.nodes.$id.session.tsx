@@ -25,6 +25,7 @@ export const Route = createFileRoute("/_authenticated/nodes/$id/session")({
   validateSearch: z.object({
     local: z.coerce.boolean().optional(),
     requestId: z.string().uuid().optional(),
+    sessionToken: z.string().min(1).optional(),
   }),
   component: RemoteSession,
 });

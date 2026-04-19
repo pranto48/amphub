@@ -56,7 +56,13 @@ function RequestPage() {
           if (next.status === "approved") toast.success("Access granted");
           if (next.status === "denied") toast.error("Access denied");
           if (next.status === "revoked") toast.error("Approval revoked");
-          if (next.status === "expired") toast.warning("Approval expired");
+          if (next.status === "expired") {
+            if (next.status_reason_code === "pending_timeout") {
+              toast.warning("Request expired", { description: "No admin decision arrived before timeout." });
+            } else {
+              toast.warning("Approval expired");
+            }
+          }
         })
       .subscribe();
     return () => {
@@ -107,7 +113,7 @@ function RequestPage() {
               onClick={() => navigate({
                 to: "/nodes/$id/session",
                 params: { id: req.node_id },
-                search: { requestId: req.id },
+                search: { requestId: req.id, sessionToken: req.session_token ?? undefined },
               })}
             >
               Launch session <ArrowRight className="size-4" />
