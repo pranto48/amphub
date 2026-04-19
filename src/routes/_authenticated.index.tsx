@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { StatusDot } from "@/components/StatusDot";
 import { OsIcon } from "@/components/OsIcon";
 import { useAuth } from "@/lib/auth-context";
+import { RouteEmptyState, RouteLoadingState } from "@/components/route-state";
 import {
   Wifi, Globe, Loader2, ShieldAlert, RefreshCw, Server, Search, ArrowRightLeft,
 } from "lucide-react";
@@ -96,7 +97,7 @@ function Dashboard() {
             {nodes.filter((n) => n.status === "online").length} online
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <Button
             variant={lanMode ? "default" : "outline"}
             size="sm"
@@ -118,7 +119,7 @@ function Dashboard() {
               AnyDesk-style access request using a node Remote ID.
             </p>
           </div>
-          <div className="flex w-full max-w-lg items-center gap-2">
+          <div className="flex w-full max-w-lg flex-wrap items-center gap-2 sm:flex-nowrap">
             <input
               className="h-9 w-full rounded-md border border-input bg-background px-3 font-mono text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
               value={remoteLookup}
@@ -133,14 +134,13 @@ function Dashboard() {
       </Card>
 
       {loading ? (
-        <div className="flex items-center justify-center py-16">
-          <Loader2 className="size-5 animate-spin text-primary" />
-        </div>
+        <RouteLoadingState label="Loading dashboard nodes" withSkeleton />
       ) : nodes.length === 0 ? (
-        <Card className="p-10 text-center">
-          <Server className="mx-auto size-8 text-muted-foreground" />
-          <p className="mt-3 text-sm text-muted-foreground">No registered nodes yet.</p>
-        </Card>
+        <RouteEmptyState
+          icon={Server}
+          title="No registered nodes yet."
+          description="Add a node to start local or approval-gated remote sessions."
+        />
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {nodes.map((n) => (

@@ -5,10 +5,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
-  Power, Maximize2, Keyboard, Loader2, ShieldAlert,
+  Power, Maximize2, Keyboard, ShieldAlert,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
+import { RouteLoadingState } from "@/components/route-state";
 
 export const Route = createFileRoute("/_authenticated/nodes/$id/session")({
   validateSearch: z.object({
@@ -171,7 +172,7 @@ function RemoteSession() {
     };
   }, [authorized, id, name, search.local, search.requestId]);
 
-  if (loading || !authChecked) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;
+  if (loading || !authChecked) return <RouteLoadingState label="Loading remote session" withSkeleton />;
   if (!authorized) {
     return (
       <Card className="p-8 text-center text-sm text-muted-foreground">
@@ -182,15 +183,21 @@ function RemoteSession() {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold">{name}</h1>
           <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">live remote session</div>
         </div>
-        <div className="flex flex-wrap items-center gap-2 justify-end">
-          <Button size="sm" variant="outline" onClick={sendCAD}><Keyboard className="size-4" /> Ctrl+Alt+Del</Button>
-          <Button size="sm" variant="outline" onClick={fullscreen}><Maximize2 className="size-4" /> Fullscreen</Button>
-          <Button size="sm" variant="destructive" onClick={disconnect}><Power className="size-4" /> Disconnect</Button>
+        <div className="flex w-full flex-wrap items-center justify-end gap-2 md:w-auto">
+          <Button size="sm" variant="outline" onClick={sendCAD} aria-label="Send Ctrl Alt Del">
+            <Keyboard className="size-4" aria-hidden="true" /> Ctrl+Alt+Del
+          </Button>
+          <Button size="sm" variant="outline" onClick={fullscreen} aria-label="Toggle fullscreen">
+            <Maximize2 className="size-4" aria-hidden="true" /> Fullscreen
+          </Button>
+          <Button size="sm" variant="destructive" onClick={disconnect} aria-label="Disconnect session">
+            <Power className="size-4" aria-hidden="true" /> Disconnect
+          </Button>
         </div>
       </div>
 

@@ -7,10 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   ArrowLeft, Folder, FolderPlus, Upload, Download, Trash2,
-  FileText, FileImage, FileCode, FileArchive, File as FileIcon, ChevronRight, Loader2,
+  FileText, FileImage, FileCode, FileArchive, File as FileIcon, ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
+import { RouteEmptyState, RouteLoadingState } from "@/components/route-state";
 
 export const Route = createFileRoute("/_authenticated/nodes/$id/files")({
   validateSearch: z.object({
@@ -218,8 +219,8 @@ function FileExplorer() {
     toast.info(`Downloading ${name}…`, { description: "Streaming via approved session" });
   }
 
-  if (loading) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;
-  if (!authChecked) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;
+  if (loading) return <RouteLoadingState label="Loading file explorer" withSkeleton />;
+  if (!authChecked) return <RouteLoadingState label="Validating file explorer access" />;
   if (!authorized) {
     return (
       <Card className="p-8 text-center text-sm text-muted-foreground">
@@ -239,11 +240,11 @@ function FileExplorer() {
 
       <Card className="p-4">
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <button onClick={() => setPath([])} className="font-mono text-primary hover:underline">{nodeName || "node"}:</button>
+          <button type="button" onClick={() => setPath([])} className="font-mono text-primary hover:underline">{nodeName || "node"}:</button>
           {path.map((seg, i) => (
             <React.Fragment key={i}>
               <ChevronRight className="size-3 text-muted-foreground" />
-              <button onClick={() => setPath(path.slice(0, i + 1))} className="font-mono hover:text-primary">{seg}</button>
+              <button type="button" onClick={() => setPath(path.slice(0, i + 1))} className="font-mono hover:text-primary">{seg}</button>
             </React.Fragment>
           ))}
         </div>
@@ -269,6 +270,7 @@ function FileExplorer() {
       <Card className="overflow-hidden p-0">
         {path.length > 0 && (
           <button
+            type="button"
             onClick={() => setPath(path.slice(0, -1))}
             className="flex w-full items-center gap-2 border-b border-border px-4 py-2.5 text-sm hover:bg-muted/40"
           >
@@ -277,11 +279,14 @@ function FileExplorer() {
           </button>
         )}
         {current.length === 0 && (
-          <div className="px-4 py-10 text-center text-sm text-muted-foreground">Empty directory</div>
+          <div className="p-4">
+            <RouteEmptyState title="Empty directory" description="Create a folder or upload a file to get started." />
+          </div>
         )}
         {current.map((e) => (
           <div key={e.name} className="flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0 hover:bg-muted/30">
             <button
+              type="button"
               onClick={() => e.kind === "folder" && setPath([...path, e.name])}
               className="flex flex-1 items-center gap-3 text-left"
             >
@@ -294,11 +299,13 @@ function FileExplorer() {
             <div className="flex items-center gap-1">
               {e.kind === "file" && (
                 <Button size="icon" variant="ghost" className="size-7" onClick={() => downloadEntry(e.name)}>
+                  <span className="sr-only">Download {e.name}</span>
                   <Download className="size-3.5" />
                 </Button>
               )}
               {isAdmin && (
                 <Button size="icon" variant="ghost" className="size-7 text-destructive" onClick={() => deleteEntry(e.name)}>
+                  <span className="sr-only">Delete {e.name}</span>
                   <Trash2 className="size-3.5" />
                 </Button>
               )}

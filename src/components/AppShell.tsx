@@ -100,14 +100,14 @@ export function AppShell() {
         </Sidebar>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-10 flex h-12 items-center gap-2 border-b border-border bg-background/80 px-3 backdrop-blur">
+          <header className="sticky top-0 z-10 flex min-h-12 flex-wrap items-center gap-2 border-b border-border bg-background/80 px-3 py-2 backdrop-blur">
             <SidebarTrigger />
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <Monitor className="size-3.5" />
               <span className="font-mono">remote-desktop-management</span>
               <span className="opacity-50">/</span>
               <FolderTree className="size-3.5" />
-              <span className="font-mono opacity-80">{loc.pathname}</span>
+              <span className="max-w-[40vw] truncate font-mono opacity-80">{loc.pathname}</span>
             </div>
             <div className="ml-auto flex items-center gap-1.5">
               <span className="size-2 rounded-full bg-success pulse-dot text-success" />
