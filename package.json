@@ -14,7 +14,12 @@
     "agent:run": "node agent/src/agent.mjs run",
     "agent:cleanup": "node agent/src/agent.mjs cleanup",
     "agent:package:linux": "bash packaging/linux/build-packages.sh",
-    "agent:package:windows": "pwsh -File packaging/windows/build-installer.ps1"
+    "agent:package:windows": "pwsh -File packaging/windows/build-installer.ps1",
+    "typecheck": "tsc --noEmit",
+    "format:check": "prettier --check .",
+    "routes:generate": "npm run build:dev",
+    "routes:check": "node scripts/check-route-tree.mjs",
+    "validate:utf8:staged": "node scripts/check-utf8.mjs"
   },
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.25.5",
@@ -89,5 +94,9 @@
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.56.1",
     "vite": "^7.3.1"
+  },
+  "engines": {
+    "node": "22.21.1",
+    "npm": "11.4.2"
   }
 }

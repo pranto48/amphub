@@ -29,6 +29,7 @@ export const Route = createFileRoute("/_authenticated/nodes/$id/files")({
   validateSearch: z.object({
     local: z.coerce.boolean().optional(),
     requestId: z.string().uuid().optional(),
+    sessionToken: z.string().min(1).optional(),
   }),
   component: FileExplorer,
 });
@@ -174,7 +175,7 @@ function FileExplorer() {
       p_action: action,
       p_request_id: search.requestId ?? null,
       p_requester_id: user?.id ?? null,
-      p_session_token: null,
+      p_session_token: search.sessionToken ?? null,
       p_local: search.local ?? false,
       p_metadata: metadata,
     });
