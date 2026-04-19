@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth-context";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 import {
   Loader2, Check, X, ShieldAlert, Activity, ScrollText,
@@ -53,13 +54,13 @@ function AdminPanel() {
       .channel("admin-requests")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "access_requests" }, (payload) => {
         const r = payload.new as ReqRow;
-        toast.warning("New access request", { description: `Requester awaiting approval` });
+        toast.warning("New access request", { description: `${nodeMap[r.node_id] ?? `Node ${r.node_id.slice(0, 8)}`} awaiting approval` });
         setPending((p) => [r, ...p]);
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "access_requests" }, () => load())
       .subscribe();
     return () => { supabase.removeChannel(ch); };
-  }, [isAdmin, load]);
+  }, [isAdmin, load, nodeMap]);
 
   async function decide(req: ReqRow, approve: boolean) {
     if (!user) return;
@@ -90,11 +91,24 @@ function AdminPanel() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Admin Panel</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-animated-accent">Admin Panel</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Approve incoming remote sessions and review activity.
         </p>
       </div>
+      <Card className="p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild size="sm" variant="secondary">
+            <Link to="/security">Security Settings</Link>
+          </Button>
+          <Button asChild size="sm" variant="outline">
+            <Link to="/settings">User Settings</Link>
+          </Button>
+          <Badge variant="outline" className="font-mono text-[10px] uppercase tracking-wider">
+            admin actions
+          </Badge>
+        </div>
+      </Card>
 
       <Card className="p-4">
         <div className="mb-3 flex items-center gap-2">

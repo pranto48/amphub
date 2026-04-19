@@ -9,6 +9,7 @@ import {
   LogOut,
   Lock,
   Server,
+  Menu,
 } from "lucide-react";
 import {
   Sidebar,
@@ -49,7 +50,7 @@ export function AppShell() {
                 <Server className="size-4" />
               </div>
               <div className="group-data-[collapsible=icon]:hidden">
-                <div className="text-sm font-semibold tracking-tight">RemoteOps</div>
+                <div className="text-sm font-semibold tracking-tight text-animated-accent">RemoteOps</div>
                 <div className="font-mono text-[10px] text-muted-foreground">v1.0 · secure</div>
               </div>
             </div>
@@ -100,8 +101,12 @@ export function AppShell() {
         </Sidebar>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-10 flex h-12 items-center gap-2 border-b border-border bg-background/80 px-3 backdrop-blur">
+          <header className="sticky top-0 z-10 flex min-h-12 flex-wrap items-center gap-2 border-b border-border bg-background/80 px-3 py-2 backdrop-blur">
             <SidebarTrigger />
+            <SidebarTrigger className="md:hidden">
+              <Menu className="size-4" />
+              Menu
+            </SidebarTrigger>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Monitor className="size-3.5" />
               <span className="font-mono">remote-desktop-management</span>

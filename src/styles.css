@@ -105,6 +105,19 @@
   to { background-position: 40px 40px; }
 }
 
+.text-animated-accent {
+  background: linear-gradient(90deg, hsl(var(--primary)), hsl(var(--accent)), hsl(var(--primary)));
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: hue-slide 5s linear infinite;
+}
+@keyframes hue-slide {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
 .pulse-dot {
   box-shadow: 0 0 0 0 currentColor;
   animation: pulse-ring 2s infinite;

@@ -8,7 +8,7 @@ import { StatusDot } from "@/components/StatusDot";
 import { OsIcon } from "@/components/OsIcon";
 import { useAuth } from "@/lib/auth-context";
 import {
-  Wifi, Globe, Loader2, ShieldAlert, RefreshCw, Server,
+  Wifi, Globe, Loader2, ShieldAlert, RefreshCw, Server, Search, ArrowRightLeft, FileStack, MonitorCog,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -31,6 +31,7 @@ function Dashboard() {
   const [loading, setLoading] = React.useState(true);
   const [lanMode, setLanMode] = React.useState(true);
   const [busyId, setBusyId] = React.useState<string | null>(null);
+  const [remoteLookup, setRemoteLookup] = React.useState("");
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -57,7 +58,7 @@ function Dashboard() {
     toast.success(`Local connection initiated to ${node.local_ip}`, {
       description: `Routing through LAN to ${node.name}`,
     });
-    navigate({ to: "/nodes/$id/session", params: { id: node.id } });
+    navigate({ to: "/nodes/$id/session", params: { id: node.id }, search: { local: true } });
   }
 
   async function requestRemote(node: Node) {
@@ -70,17 +71,28 @@ function Dashboard() {
       .single();
     setBusyId(null);
     if (error) { toast.error(error.message); return; }
-    toast.info("Access request sent", { description: "Awaiting admin approval…" });
+    toast.info("Access request sent", { description: `Request created for ${node.name}. Awaiting admin approval...` });
     navigate({ to: "/requests/$id", params: { id: data.id } });
+  }
+
+  function quickConnect() {
+    const normalized = remoteLookup.trim();
+    if (!normalized) return;
+    const matched = nodes.find((n) => n.remote_id === normalized);
+    if (!matched) {
+      toast.error("Remote ID not found", { description: "Check the node's Remote ID and try again." });
+      return;
+    }
+    requestRemote(matched);
   }
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Desktop Nodes</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-animated-accent">Desktop Nodes</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Registered remote desktops · {nodes.length} total ·{" "}
+            Registered remote desktops | {nodes.length} total |{" "}
             {nodes.filter((n) => n.status === "online").length} online
           </p>
         </div>
@@ -98,6 +110,40 @@ function Dashboard() {
           </Button>
         </div>
       </div>
+      <Card className="p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="secondary">
+            <MonitorCog className="size-4" /> Session Monitor
+          </Button>
+          <Button size="sm" variant="outline">
+            <FileStack className="size-4" /> File Center
+          </Button>
+          <Button size="sm" variant="outline" onClick={load}>
+            <RefreshCw className="size-4" /> Sync Nodes
+          </Button>
+        </div>
+      </Card>
+      <Card className="p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold">Remote ID access</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              AnyDesk-style access request using a node Remote ID.
+            </p>
+          </div>
+          <div className="flex w-full max-w-lg items-center gap-2">
+            <input
+              className="h-9 w-full rounded-md border border-input bg-background px-3 font-mono text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              value={remoteLookup}
+              onChange={(e) => setRemoteLookup(e.target.value)}
+              placeholder="e.g. 847-291-563"
+            />
+            <Button size="sm" variant="secondary" onClick={quickConnect}>
+              <Search className="size-4" /> Request Access
+            </Button>
+          </div>
+        </div>
+      </Card>
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
@@ -144,31 +190,33 @@ function Dashboard() {
                 </div>
 
                 <div className="flex items-center gap-2 pt-1">
-                  {lanMode ? (
-                    <Button
-                      size="sm"
-                      className="flex-1"
-                      disabled={n.status !== "online"}
-                      onClick={() => localAccess(n)}
-                    >
-                      <Wifi className="size-4" /> Local Access
-                    </Button>
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      className="flex-1"
-                      disabled={busyId === n.id || n.status !== "online"}
-                      onClick={() => requestRemote(n)}
-                    >
-                      {busyId === n.id ? <Loader2 className="size-4 animate-spin" /> : <Globe className="size-4" />}
-                      Request Remote Access
-                    </Button>
-                  )}
+                  <Button
+                    size="sm"
+                    className="flex-1"
+                    disabled={n.status !== "online" || !lanMode}
+                    onClick={() => localAccess(n)}
+                  >
+                    <Wifi className="size-4" /> Local Access
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="flex-1"
+                    disabled={busyId === n.id || n.status !== "online"}
+                    onClick={() => requestRemote(n)}
+                  >
+                    {busyId === n.id ? <Loader2 className="size-4 animate-spin" /> : <ArrowRightLeft className="size-4" />}
+                    Remote Access
+                  </Button>
                   <Badge variant="outline" className="font-mono text-[10px]">
                     {n.status === "online" ? "READY" : "OFFLINE"}
                   </Badge>
                 </div>
+                {!lanMode && (
+                  <div className="rounded-md border border-warning/30 bg-warning/10 px-2 py-1 font-mono text-[10px] text-warning">
+                    Remote mode enabled: local-connect path disabled.
+                  </div>
+                )}
               </div>
             </Card>
           ))}
