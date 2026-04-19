@@ -447,6 +447,43 @@ export type Database = {
         }
         Returns: string
       }
+      guard_access_request_submission: {
+        Args: {
+          p_client_fingerprint?: string
+          p_node_id: string
+          p_requester_id: string
+        }
+        Returns: {
+          allowed: boolean
+          attempt_count: number
+          denial_reason: string | null
+          locked_until: string | null
+        }[]
+      }
+      guard_auth_login_attempt: {
+        Args: {
+          p_client_fingerprint?: string
+          p_identifier: string
+        }
+        Returns: {
+          allowed: boolean
+          attempt_count: number
+          denial_reason: string | null
+          locked_until: string | null
+        }[]
+      }
+      guard_remote_id_probe: {
+        Args: {
+          p_client_fingerprint?: string
+          p_remote_id: string
+        }
+        Returns: {
+          allowed: boolean
+          attempt_count: number
+          denial_reason: string | null
+          locked_until: string | null
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -467,21 +504,12 @@ export type Database = {
         }
         Returns: string
       }
-      lookup_node_by_remote_id: {
+      mark_auth_login_success: {
         Args: {
-          p_remote_id: string
+          p_client_fingerprint?: string
+          p_identifier: string
         }
-        Returns: {
-          node_id: string
-          remote_id: string
-          status: string
-        }[]
-      }
-      normalize_remote_id: {
-        Args: {
-          p_remote_id: string
-        }
-        Returns: string
+        Returns: boolean
       }
       record_privileged_event: {
         Args: {
