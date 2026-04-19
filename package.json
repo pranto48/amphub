@@ -9,7 +9,12 @@
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "agent:init": "node agent/src/agent.mjs init-config",
+    "agent:run": "node agent/src/agent.mjs run",
+    "agent:cleanup": "node agent/src/agent.mjs cleanup",
+    "agent:package:linux": "bash packaging/linux/build-packages.sh",
+    "agent:package:windows": "pwsh -File packaging/windows/build-installer.ps1"
   },
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.25.5",

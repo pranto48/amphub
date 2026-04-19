@@ -27,6 +27,21 @@ type Node = {
   lan_detection_source: string | null;
 };
 
+const REMOTE_ID_DIGITS = 9;
+
+function canonicalizeRemoteIdInput(value: string): string {
+  const digits = value.replace(/\D/g, "").slice(0, REMOTE_ID_DIGITS);
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+  return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
+function normalizeRemoteIdForLookup(value: string): string | null {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length !== REMOTE_ID_DIGITS) return null;
+  return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
 function parsePrivateIPv4(value: string | null | undefined): string | null {
   if (!value) return null;
   const ipv4Pattern = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
@@ -151,6 +166,10 @@ function Dashboard() {
         requester_identity: user.user_metadata?.display_name ?? user.email ?? user.id,
         node_name: node.name,
         location_hint: Intl.DateTimeFormat().resolvedOptions().timeZone ?? null,
+        request_reason: requestReason.trim() || null,
+        status_reason_code: "awaiting_admin_decision",
+        status_reason_message: "Waiting for admin review",
+        pending_expires_at: new Date(Date.now() + pendingTimeoutMinutes * 60 * 1000).toISOString(),
       })
       .select()
       .single();
@@ -223,13 +242,32 @@ function Dashboard() {
             <input
               className="h-9 w-full rounded-md border border-input bg-background px-3 font-mono text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
               value={remoteLookup}
-              onChange={(e) => setRemoteLookup(e.target.value)}
+              onChange={(e) => setRemoteLookup(canonicalizeRemoteIdInput(e.target.value))}
               placeholder="e.g. 847-291-563"
             />
             <Button size="sm" variant="secondary" onClick={quickConnect}>
               <Search className="size-4" /> Request Access
             </Button>
           </div>
+        </div>
+        <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]">
+          <input
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            value={requestReason}
+            onChange={(e) => setRequestReason(e.target.value)}
+            placeholder="Reason for access (shown to admins)"
+          />
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            Pending timeout (min)
+            <input
+              className="h-9 w-20 rounded-md border border-input bg-background px-2 font-mono text-sm"
+              min={1}
+              max={120}
+              type="number"
+              value={pendingTimeoutMinutes}
+              onChange={(e) => setPendingTimeoutMinutes(Math.max(1, Math.min(120, Number(e.target.value) || 10)))}
+            />
+          </label>
         </div>
       </Card>
 

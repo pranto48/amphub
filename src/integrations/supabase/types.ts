@@ -23,11 +23,15 @@ export type Database = {
           location_hint: string | null
           node_id: string
           node_name: string | null
+          pending_expires_at: string | null
+          request_reason: string | null
           requested_at: string
           requester_id: string
           requester_identity: string | null
           revoked_at: string | null
           session_token: string | null
+          status_reason_code: string | null
+          status_reason_message: string | null
           status: string
           token_bound_node_id: string
           token_bound_requester_id: string
@@ -42,11 +46,15 @@ export type Database = {
           location_hint?: string | null
           node_id: string
           node_name?: string | null
+          pending_expires_at?: string | null
+          request_reason?: string | null
           requested_at?: string
           requester_id: string
           requester_identity?: string | null
           revoked_at?: string | null
           session_token?: string | null
+          status_reason_code?: string | null
+          status_reason_message?: string | null
           status?: string
           token_bound_node_id?: string
           token_bound_requester_id?: string
@@ -61,11 +69,15 @@ export type Database = {
           location_hint?: string | null
           node_id?: string
           node_name?: string | null
+          pending_expires_at?: string | null
+          request_reason?: string | null
           requested_at?: string
           requester_id?: string
           requester_identity?: string | null
           revoked_at?: string | null
           session_token?: string | null
+          status_reason_code?: string | null
+          status_reason_message?: string | null
           status?: string
           token_bound_node_id?: string
           token_bound_requester_id?: string
@@ -81,6 +93,42 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      admin_access_policies: {
+        Row: {
+          auto_deny_outside_business_hours: boolean
+          business_hours_end: string
+          business_hours_start: string
+          id: string
+          max_session_duration_by_role: Json
+          require_two_step_sensitive_nodes: boolean
+          sensitive_node_ids: string[]
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          auto_deny_outside_business_hours?: boolean
+          business_hours_end?: string
+          business_hours_start?: string
+          id?: string
+          max_session_duration_by_role?: Json
+          require_two_step_sensitive_nodes?: boolean
+          sensitive_node_ids?: string[]
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          auto_deny_outside_business_hours?: boolean
+          business_hours_end?: string
+          business_hours_start?: string
+          id?: string
+          max_session_duration_by_role?: Json
+          require_two_step_sensitive_nodes?: boolean
+          sensitive_node_ids?: string[]
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
       }
       audit_log: {
         Row: {
@@ -279,6 +327,7 @@ export type Database = {
       admin_decide_access_request: {
         Args: {
           p_decision: string
+          p_note?: string
           p_request_id: string
           p_single_use?: boolean
           p_ttl_minutes?: number
@@ -291,17 +340,34 @@ export type Database = {
           location_hint: string | null
           node_id: string
           node_name: string | null
+          pending_expires_at: string | null
+          request_reason: string | null
           requested_at: string
           requester_id: string
           requester_identity: string | null
           revoked_at: string | null
           session_token: string | null
+          status_reason_code: string | null
+          status_reason_message: string | null
           status: string
           token_bound_node_id: string
           token_bound_requester_id: string
           token_single_use: boolean
           token_used_at: string | null
         }
+      }
+      admin_rotate_remote_id: {
+        Args: {
+          p_agent_rebind_token: string
+          p_node_id: string
+          p_reason?: string
+        }
+        Returns: {
+          new_remote_id: string
+          node_id: string
+          old_remote_id: string
+          status: string
+        }[]
       }
       admin_terminate_session: {
         Args: {
@@ -365,6 +431,12 @@ export type Database = {
           same_lan: boolean
           status: string
         }[]
+      }
+      expire_access_requests: {
+        Args: {
+          p_pending_timeout_minutes?: number
+        }
+        Returns: number
       }
       export_incident_review: {
         Args: {
