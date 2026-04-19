@@ -34,8 +34,6 @@ import {
 export const Route = createFileRoute("/_authenticated/admin")({ component: AdminPanel });
 
 type ReqStatus = "pending" | "approved" | "denied" | "revoked" | "expired";
-type Severity = "info" | "warning" | "success" | "error";
-type AuditFilter = "all" | "auth" | "approval" | "file_ops" | "remote_control";
 
 type ReqRow = {
   id: string;
@@ -261,7 +259,7 @@ function AdminPanel() {
     setDeniedAttemptMap(deniedCounts);
 
     setLoading(false);
-  }, [auditFilter]);
+  }, [pendingTimeoutMinutes]);
 
   React.useEffect(() => {
     if (!isAdmin) return;
@@ -331,9 +329,10 @@ function AdminPanel() {
       p_session_id: session.id,
       p_reason: "terminated_from_admin_panel",
     });
+    setBusyRequest(null);
 
     if (error) {
-      notify("error", "Terminate failed", error.message);
+      toast.error("Decision failed", { description: error.message });
       return;
     }
 
@@ -519,25 +518,6 @@ function AdminPanel() {
           <h2 className="text-sm font-semibold">Notification feed</h2>
           <Badge variant="outline" className="font-mono">{notifications.length}</Badge>
         </div>
-        {notifications.length === 0 ? (
-          <div className="py-6 text-center text-xs text-muted-foreground">No notifications yet.</div>
-        ) : (
-          <div className="max-h-44 space-y-2 overflow-auto pr-2">
-            {notifications.map((n) => (
-              <div key={n.id} className="flex items-start gap-2 rounded-md border border-border p-2 text-xs">
-                {n.severity === "success" ? <CircleCheckBig className="mt-0.5 size-3.5 text-emerald-500" /> : null}
-                {n.severity === "warning" ? <AlertTriangle className="mt-0.5 size-3.5 text-amber-500" /> : null}
-                {n.severity === "error" ? <CircleOff className="mt-0.5 size-3.5 text-destructive" /> : null}
-                {n.severity === "info" ? <Radio className="mt-0.5 size-3.5 text-primary" /> : null}
-                <div className="min-w-0">
-                  <div className="font-medium">{n.title}</div>
-                  <div className="text-muted-foreground">{n.description}</div>
-                </div>
-                <div className="ml-auto whitespace-nowrap font-mono text-[10px] text-muted-foreground">{new Date(n.createdAt).toLocaleTimeString()}</div>
-              </div>
-            ))}
-          </div>
-        )}
       </Card>
 
       <Card className="p-4">
@@ -588,7 +568,6 @@ function AdminPanel() {
 
       <Card className="p-4">
         <div className="mb-3 flex items-center gap-2">
-          <Ban className="size-4 text-destructive" />
           <h2 className="text-sm font-semibold">Active approvals</h2>
           <Badge variant="outline" className="font-mono">{approved.length}</Badge>
         </div>
