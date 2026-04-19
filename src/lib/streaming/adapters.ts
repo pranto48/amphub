@@ -4,6 +4,8 @@ import {
   type ResizeDimensions,
   type StreamInputMessage,
 } from "./remote-stream-adapter";
+import type { ControlEnvelope } from "./protocol";
+import { SupabaseSessionSignaling, type NegotiatedSession } from "./signaling";
 
 export class MockStreamAdapter extends BaseRemoteStreamAdapter {
   private canvas: HTMLCanvasElement | null = null;
@@ -100,73 +102,164 @@ export class MockStreamAdapter extends BaseRemoteStreamAdapter {
 
   private startStatsLoop() {
     this.statsHandle = window.setInterval(() => {
-      this.stats.latencyMs = 18 + Math.round(Math.random() * 24);
-      this.stats.fps = 56 + Math.round(Math.random() * 6);
+      this.setTelemetry({
+        latencyMs: 18 + Math.round(Math.random() * 24),
+        fps: 56 + Math.round(Math.random() * 6),
+      });
     }, 1000);
   }
 }
 
-export class WebRTCGatewayAdapter extends BaseRemoteStreamAdapter {
-  async connect(_options: ConnectOptions) {
+abstract class SignaledBridgeAdapter extends BaseRemoteStreamAdapter {
+  protected signaling = new SupabaseSessionSignaling();
+  protected negotiated: NegotiatedSession | null = null;
+  protected options: ConnectOptions | null = null;
+  private reconnectTimer: number | null = null;
+  private reconnectAttempts = 0;
+
+  async connect(options: ConnectOptions) {
+    this.options = options;
     this.setState("connecting");
-    // Scaffold for STREAMING.md path #3:
-    // 1. exchange SDP via signaling channel
-    // 2. attach incoming video track to canvas (WebCodecs/WebGL path)
-    // 3. start control/data channels for input + commands
-    this.setState("failed");
+
+    try {
+      this.negotiated = await this.signaling.negotiate({
+        nodeId: options.nodeId,
+        requestId: options.requestId,
+        sessionToken: options.sessionToken,
+        local: options.local,
+      });
+
+      await this.signaling.joinControlChannel(this.negotiated.signalingRoom, {
+        onControlMessage: (message) => this.onControlMessage(message),
+        onStateChange: (next) => this.onControlState(next),
+        onTelemetry: (stats) => this.setTelemetry(stats),
+      });
+
+      await this.signaling.announceHello({
+        sessionId: this.negotiated.sessionId,
+        requestId: options.requestId ?? this.negotiated.sessionId,
+        capabilities: {
+          adapters: ["webrtc", "rdp", "vnc"],
+          controlChannel: "supabase-realtime",
+          supportsKeyboard: true,
+          supportsPointer: true,
+          supportsClipboard: false,
+        },
+      });
+
+      this.setState(this.negotiated.viewerState === "agent-offline" ? "failed" : "connected");
+    } catch {
+      this.setState("failed");
+    }
   }
 
-  async disconnect() {
+  async disconnect(reason = "user_disconnect") {
+    if (this.reconnectTimer) window.clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+
+    if (this.negotiated && this.options) {
+      await this.signaling.sendControl({
+        type: "control.disconnect",
+        sessionId: this.negotiated.sessionId,
+        requestId: this.options.requestId ?? this.negotiated.sessionId,
+        payload: { reason },
+      });
+    }
+
+    await this.signaling.close();
+    this.negotiated = null;
     this.setState("disconnected");
   }
 
-  async sendInput(_message: StreamInputMessage) {
-    // TODO: write into RTCDataChannel command/input stream.
+  async sendInput(message: StreamInputMessage) {
+    if (!this.negotiated || !this.options) return;
+    if (message.type === "command") {
+      const type = message.command === "ctrl_alt_del" ? "control.ctrl_alt_del" : "control.disconnect";
+      await this.signaling.sendControl({
+        type,
+        sessionId: this.negotiated.sessionId,
+        requestId: this.options.requestId ?? this.negotiated.sessionId,
+        payload: {},
+      });
+      return;
+    }
+
+    if (message.type === "key") {
+      await this.signaling.sendControl({
+        type: "input.key",
+        sessionId: this.negotiated.sessionId,
+        requestId: this.options.requestId ?? this.negotiated.sessionId,
+        payload: { key: message.key, pressed: message.pressed },
+      });
+      return;
+    }
+
+    if (message.type === "wheel") {
+      await this.signaling.sendControl({
+        type: "input.pointer_wheel",
+        sessionId: this.negotiated.sessionId,
+        requestId: this.options.requestId ?? this.negotiated.sessionId,
+        payload: { dx: message.dx, dy: message.dy },
+      });
+      return;
+    }
+
+    await this.signaling.sendControl({
+      type: "input.pointer_move",
+      sessionId: this.negotiated.sessionId,
+      requestId: this.options.requestId ?? this.negotiated.sessionId,
+      payload: { x: message.x, y: message.y, button: message.button, pressed: message.pressed },
+    });
   }
 
-  async resize(_dimensions: ResizeDimensions) {
-    // TODO: notify remote encoder of viewport dimensions.
+  async resize(dimensions: ResizeDimensions) {
+    if (!this.negotiated || !this.options) return;
+    await this.signaling.sendControl({
+      type: "flow.resume",
+      sessionId: this.negotiated.sessionId,
+      requestId: this.options.requestId ?? this.negotiated.sessionId,
+      payload: dimensions,
+    });
+  }
+
+  private onControlMessage(message: ControlEnvelope) {
+    if (message.type === "media.stats") {
+      const payload = message.payload as { latencyMs?: number; fps?: number };
+      this.setTelemetry({ latencyMs: payload.latencyMs ?? null, fps: payload.fps ?? null });
+      this.markFrame();
+    }
+  }
+
+  private onControlState(next: "disconnected" | "connecting" | "connected" | "reconnecting" | "failed") {
+    this.setState(next);
+    if (!this.options || !this.negotiated) return;
+
+    if (next === "reconnecting") {
+      const backoff = Math.min(10_000, 250 * 2 ** this.reconnectAttempts);
+      this.reconnectAttempts += 1;
+      if (this.reconnectTimer) window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = window.setTimeout(() => {
+        if (!this.options) return;
+        void this.connect(this.options);
+      }, backoff);
+      return;
+    }
+
+    if (next === "connected") {
+      this.reconnectAttempts = 0;
+      void this.signaling.heartbeat({
+        nodeId: this.options.nodeId,
+        sessionId: this.negotiated.sessionId,
+        requestId: this.options.requestId,
+        latencyMs: this.stats.latencyMs ?? undefined,
+        fps: this.stats.fps ?? undefined,
+      });
+    }
   }
 }
 
-export class RdpBridgeAdapter extends BaseRemoteStreamAdapter {
-  async connect(_options: ConnectOptions) {
-    this.setState("connecting");
-    // Scaffold for STREAMING.md path #1:
-    // integrate a Guacamole/bridge websocket tunnel and decode frames.
-    this.setState("failed");
-  }
+export class WebRTCGatewayAdapter extends SignaledBridgeAdapter {}
 
-  async disconnect() {
-    this.setState("disconnected");
-  }
+export class RdpBridgeAdapter extends SignaledBridgeAdapter {}
 
-  async sendInput(_message: StreamInputMessage) {
-    // TODO: marshal keyboard/pointer/control to RDP bridge.
-  }
-
-  async resize(_dimensions: ResizeDimensions) {
-    // TODO: send display update command to RDP bridge.
-  }
-}
-
-export class VncBridgeAdapter extends BaseRemoteStreamAdapter {
-  async connect(_options: ConnectOptions) {
-    this.setState("connecting");
-    // Scaffold for STREAMING.md path #2:
-    // integrate noVNC/websockify websocket and pipe to canvas.
-    this.setState("failed");
-  }
-
-  async disconnect() {
-    this.setState("disconnected");
-  }
-
-  async sendInput(_message: StreamInputMessage) {
-    // TODO: forward keyboard/pointer/control over VNC websocket protocol.
-  }
-
-  async resize(_dimensions: ResizeDimensions) {
-    // TODO: request framebuffer resize/update.
-  }
-}
+export class VncBridgeAdapter extends SignaledBridgeAdapter {}

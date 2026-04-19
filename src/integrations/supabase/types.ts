@@ -527,6 +527,33 @@ export type Database = {
           event_id: string
         }[]
       }
+      session_stream_heartbeat: {
+        Args: {
+          p_fps?: number
+          p_latency_ms?: number
+          p_node_id: string
+          p_request_id?: string
+          p_session_id: string
+        }
+        Returns: boolean
+      }
+      session_stream_negotiate: {
+        Args: {
+          p_node_id: string
+          p_request_id?: string
+          p_session_token?: string
+        }
+        Returns: {
+          authorized: boolean
+          control_token: string | null
+          denial_reason: string | null
+          media_endpoint: string | null
+          preferred_adapter: string | null
+          session_id: string | null
+          signaling_room: string | null
+          viewer_state: string | null
+        }[]
+      }
       set_node_master_password: {
         Args: {
           p_node_id: string
