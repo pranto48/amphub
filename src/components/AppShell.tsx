@@ -43,7 +43,7 @@ export function AppShell() {
   return (
     <SidebarProvider>
       <div className="flex min-h-svh w-full bg-background">
-        <Sidebar collapsible="icon">
+        <Sidebar collapsible="icon" aria-label="Primary navigation">
           <SidebarHeader>
             <div className="flex items-center gap-2 px-2 py-1">
               <div className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
@@ -101,9 +101,9 @@ export function AppShell() {
         </Sidebar>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-10 flex min-h-12 flex-wrap items-center gap-2 border-b border-border bg-background/80 px-3 py-2 backdrop-blur">
-            <SidebarTrigger />
-            <SidebarTrigger className="md:hidden">
+          <header className="sticky top-0 z-10 flex min-h-12 flex-wrap items-center gap-2 border-b border-border bg-background/90 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/75">
+            <SidebarTrigger className="hidden md:inline-flex" aria-label="Toggle desktop sidebar" />
+            <SidebarTrigger className="md:hidden" aria-label="Toggle mobile sidebar">
               <Menu className="size-4" />
               Menu
             </SidebarTrigger>
