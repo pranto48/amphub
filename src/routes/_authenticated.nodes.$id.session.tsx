@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
-  Power, Maximize2, Keyboard, Loader2, ShieldAlert,
+  Power, Maximize2, Keyboard, ShieldAlert,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
@@ -24,6 +24,7 @@ function RemoteSession() {
   const search = Route.useSearch();
   const { user } = useAuth();
   const navigate = useNavigate();
+
   const [name, setName] = React.useState("");
   const [loading, setLoading] = React.useState(true);
   const [authorized, setAuthorized] = React.useState(false);
@@ -98,11 +99,55 @@ function RemoteSession() {
     else el.requestFullscreen?.();
   }
 
-  function sendCAD() {
+  async function sendCAD() {
+    const password = window.prompt("Enter node master password for privileged control:");
+    if (!password) {
+      toast.error("Action canceled", { description: "Master password is required." });
+      return;
+    }
+
+    const verify = await supabase.rpc("verify_node_master_password", {
+      p_node_id: id,
+      p_password: password,
+      p_context: "session_ctrl_alt_del",
+    });
+    const verifyResult = verify.data?.[0];
+    if (verify.error || !verifyResult?.verified) {
+      toast.error("Password verification failed", {
+        description: verifyResult?.error_code ?? verify.error?.message ?? "invalid_password",
+      });
+      return;
+    }
+
+    await adapterRef.current?.sendInput({ type: "command", command: "ctrl_alt_del" });
+
+    const { data } = await supabase.rpc("record_privileged_event", {
+      p_node_id: id,
+      p_action: "session_ctrl_alt_del",
+      p_request_id: search.requestId ?? null,
+      p_local: search.local ?? false,
+      p_metadata: { node_name: name, command: "ctrl_alt_del" },
+    });
+
+    const result = data?.[0];
+    if (!result?.authorized) {
+      toast.error("Ctrl+Alt+Del denied", { description: result?.denial_reason ?? "request_not_approved" });
+      return;
+    }
+
     toast.info("Ctrl+Alt+Del sent", { description: "Routed through approved session" });
   }
 
-  function disconnect() {
+  async function disconnect() {
+    await adapterRef.current?.disconnect("user_disconnect");
+    await supabase.rpc("record_privileged_event", {
+      p_node_id: id,
+      p_action: "session_end",
+      p_request_id: search.requestId ?? null,
+      p_local: search.local ?? false,
+      p_metadata: { node_name: name, source: "disconnect", connection_state: connectionState },
+    });
+
     toast.success("Session ended");
     navigate({ to: "/" });
   }
@@ -118,7 +163,7 @@ function RemoteSession() {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold">{name}</h1>
           <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">live remote session</div>
