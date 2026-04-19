@@ -23,8 +23,13 @@ export type Database = {
           node_id: string
           requested_at: string
           requester_id: string
+          revoked_at: string | null
           session_token: string | null
           status: string
+          token_bound_node_id: string
+          token_bound_requester_id: string
+          token_single_use: boolean
+          token_used_at: string | null
         }
         Insert: {
           decided_at?: string | null
@@ -34,8 +39,13 @@ export type Database = {
           node_id: string
           requested_at?: string
           requester_id: string
+          revoked_at?: string | null
           session_token?: string | null
           status?: string
+          token_bound_node_id?: string
+          token_bound_requester_id?: string
+          token_single_use?: boolean
+          token_used_at?: string | null
         }
         Update: {
           decided_at?: string | null
@@ -45,8 +55,13 @@ export type Database = {
           node_id?: string
           requested_at?: string
           requester_id?: string
+          revoked_at?: string | null
           session_token?: string | null
           status?: string
+          token_bound_node_id?: string
+          token_bound_requester_id?: string
+          token_single_use?: boolean
+          token_used_at?: string | null
         }
         Relationships: [
           {
@@ -177,6 +192,30 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      admin_decide_access_request: {
+        Args: {
+          p_decision: string
+          p_request_id: string
+          p_single_use?: boolean
+          p_ttl_minutes?: number
+        }
+        Returns: {
+          decided_at: string | null
+          decided_by: string | null
+          expires_at: string | null
+          id: string
+          node_id: string
+          requested_at: string
+          requester_id: string
+          revoked_at: string | null
+          session_token: string | null
+          status: string
+          token_bound_node_id: string
+          token_bound_requester_id: string
+          token_single_use: boolean
+          token_used_at: string | null
+        }
+      }
       authorize_privileged_access: {
         Args: {
           p_local?: boolean
@@ -189,6 +228,10 @@ export type Database = {
           denial_reason: string | null
           matched_request_id: string | null
         }[]
+      }
+      expire_access_requests: {
+        Args: Record<PropertyKey, never>
+        Returns: number
       }
       has_role: {
         Args: {
