@@ -84,6 +84,7 @@ function FileExplorer() {
   const [loading, setLoading] = React.useState(true);
   const [authorized, setAuthorized] = React.useState(false);
   const [authChecked, setAuthChecked] = React.useState(false);
+  const [denialReason, setDenialReason] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     supabase.from("desktop_nodes").select("name").eq("id", id).maybeSingle().then(({ data }) => {
@@ -95,30 +96,25 @@ function FileExplorer() {
   React.useEffect(() => {
     let cancelled = false;
     async function checkAccess() {
-      if (search.local) {
-        if (!cancelled) {
-          setAuthorized(true);
-          setAuthChecked(true);
-        }
-        return;
-      }
-      if (!user || !search.requestId) {
+      if (!user) {
         if (!cancelled) {
           setAuthorized(false);
+          setDenialReason("request_not_approved");
           setAuthChecked(true);
         }
         return;
       }
-      const { data } = await supabase
-        .from("access_requests")
-        .select("id,status,expires_at")
-        .eq("id", search.requestId)
-        .eq("node_id", id)
-        .eq("requester_id", user.id)
-        .maybeSingle();
-      const ok = !!data && data.status === "approved" && (!!data.expires_at ? new Date(data.expires_at).getTime() > Date.now() : false);
+
+      const { data, error } = await supabase.rpc("authorize_privileged_access", {
+        p_node_id: id,
+        p_request_id: search.requestId ?? null,
+        p_local: search.local ?? false,
+      });
+      const result = data?.[0];
+      const ok = !error && !!result?.authorized;
       if (!cancelled) {
         setAuthorized(ok);
+        setDenialReason(result?.denial_reason ?? (error ? "request_not_approved" : null));
         setAuthChecked(true);
       }
     }
@@ -149,18 +145,57 @@ function FileExplorer() {
     toast.success(`Folder “${name}” created`);
   }
 
-  function uploadFile() {
+  async function uploadFile() {
+    const { data } = await supabase.rpc("record_privileged_event", {
+      p_node_id: id,
+      p_action: "file_upload",
+      p_request_id: search.requestId ?? null,
+      p_local: search.local ?? false,
+      p_metadata: { path },
+    });
+    const result = data?.[0];
+    if (!result?.authorized) {
+      toast.error("Upload denied", { description: result?.denial_reason ?? "request_not_approved" });
+      return;
+    }
+
     const name = `upload-${Date.now()}.txt`;
     mutateAt(path, (entries) => [...entries, { kind: "file", name, size: Math.floor(Math.random() * 50000), type: "text" }]);
     toast.success(`Uploaded ${name}`);
   }
 
-  function deleteEntry(name: string) {
+  async function deleteEntry(name: string) {
+    const { data } = await supabase.rpc("record_privileged_event", {
+      p_node_id: id,
+      p_action: "file_delete",
+      p_request_id: search.requestId ?? null,
+      p_local: search.local ?? false,
+      p_metadata: { path, name },
+    });
+    const result = data?.[0];
+    if (!result?.authorized) {
+      toast.error("Delete denied", { description: result?.denial_reason ?? "request_not_approved" });
+      return;
+    }
+
     mutateAt(path, (entries) => entries.filter((e) => e.name !== name));
     toast.success(`Deleted ${name}`);
   }
 
-  function downloadEntry(name: string) {
+  async function downloadEntry(name: string) {
+    const { data } = await supabase.rpc("record_privileged_event", {
+      p_node_id: id,
+      p_action: "file_download",
+      p_request_id: search.requestId ?? null,
+      p_local: search.local ?? false,
+      p_metadata: { path, name },
+    });
+    const result = data?.[0];
+    if (!result?.authorized) {
+      toast.error("Download denied", { description: result?.denial_reason ?? "request_not_approved" });
+      return;
+    }
+
     toast.info(`Downloading ${name}…`, { description: "Streaming via approved session" });
   }
 
@@ -169,7 +204,7 @@ function FileExplorer() {
   if (!authorized) {
     return (
       <Card className="p-8 text-center text-sm text-muted-foreground">
-        This file explorer requires LAN access or an approved, non-expired remote session.
+        Access denied: {denialReason ?? "request_not_approved"}. This file explorer requires LAN access with policy guard or an approved, non-expired remote session.
       </Card>
     );
   }
