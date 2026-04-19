@@ -82,6 +82,42 @@ export type Database = {
           },
         ]
       }
+      admin_access_policies: {
+        Row: {
+          auto_deny_outside_business_hours: boolean
+          business_hours_end: string
+          business_hours_start: string
+          id: string
+          max_session_duration_by_role: Json
+          require_two_step_sensitive_nodes: boolean
+          sensitive_node_ids: string[]
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          auto_deny_outside_business_hours?: boolean
+          business_hours_end?: string
+          business_hours_start?: string
+          id?: string
+          max_session_duration_by_role?: Json
+          require_two_step_sensitive_nodes?: boolean
+          sensitive_node_ids?: string[]
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          auto_deny_outside_business_hours?: boolean
+          business_hours_end?: string
+          business_hours_start?: string
+          id?: string
+          max_session_duration_by_role?: Json
+          require_two_step_sensitive_nodes?: boolean
+          sensitive_node_ids?: string[]
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       audit_log: {
         Row: {
           action: string
