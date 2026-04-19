@@ -303,6 +303,19 @@ export type Database = {
           token_used_at: string | null
         }
       }
+      admin_rotate_remote_id: {
+        Args: {
+          p_agent_rebind_token: string
+          p_node_id: string
+          p_reason?: string
+        }
+        Returns: {
+          new_remote_id: string
+          node_id: string
+          old_remote_id: string
+          status: string
+        }[]
+      }
       admin_terminate_session: {
         Args: {
           p_reason?: string
@@ -392,6 +405,22 @@ export type Database = {
         Args: {
           ip_text: string
           mask_bits?: number
+        }
+        Returns: string
+      }
+      lookup_node_by_remote_id: {
+        Args: {
+          p_remote_id: string
+        }
+        Returns: {
+          node_id: string
+          remote_id: string
+          status: string
+        }[]
+      }
+      normalize_remote_id: {
+        Args: {
+          p_remote_id: string
         }
         Returns: string
       }
