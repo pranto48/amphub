@@ -190,6 +190,35 @@ export type Database = {
           matched_request_id: string | null
         }[]
       }
+      audit_access_mode_decision: {
+        Args: {
+          p_detected_same_lan: boolean
+          p_detection_source?: string
+          p_effective_mode: string
+          p_manual_lan_mode: boolean
+          p_node_id: string
+          p_override_differs?: boolean
+          p_requester_hints?: string[]
+        }
+        Returns: string
+      }
+      dashboard_nodes_with_lan: {
+        Args: {
+          p_requester_hints?: string[]
+          p_requester_ip?: string
+        }
+        Returns: {
+          id: string
+          lan_detection_source: string | null
+          last_seen: string | null
+          local_ip: string
+          name: string
+          os: string
+          remote_id: string
+          same_lan: boolean
+          status: string
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -202,6 +231,13 @@ export type Database = {
           ip_text: string
         }
         Returns: boolean
+      }
+      lan_ipv4_subnet: {
+        Args: {
+          ip_text: string
+          mask_bits?: number
+        }
+        Returns: string
       }
       record_privileged_event: {
         Args: {
