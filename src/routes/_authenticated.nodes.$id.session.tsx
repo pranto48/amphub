@@ -5,7 +5,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
-  Power, Maximize2, Keyboard, Loader2, ShieldAlert,
+  Power,
+  Maximize2,
+  Keyboard,
+  ShieldAlert,
+  Loader2,
+  CircleDashed,
+  WifiOff,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
@@ -24,6 +30,7 @@ function RemoteSession() {
   const search = Route.useSearch();
   const { user } = useAuth();
   const navigate = useNavigate();
+
   const [name, setName] = React.useState("");
   const [loading, setLoading] = React.useState(true);
   const [authorized, setAuthorized] = React.useState(false);
@@ -32,10 +39,15 @@ function RemoteSession() {
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
 
   React.useEffect(() => {
-    supabase.from("desktop_nodes").select("name,remote_id,local_ip,os").eq("id", id).maybeSingle().then(({ data }) => {
-      setName(data?.name ?? "node");
-      setLoading(false);
-    });
+    supabase
+      .from("desktop_nodes")
+      .select("name")
+      .eq("id", id)
+      .maybeSingle()
+      .then(({ data }) => {
+        setName(data?.name ?? "node");
+        setLoading(false);
+      });
   }, [id]);
 
   React.useEffect(() => {
@@ -98,11 +110,57 @@ function RemoteSession() {
     else el.requestFullscreen?.();
   }
 
-  function sendCAD() {
+  async function sendCAD() {
+    const password = window.prompt("Enter node master password for privileged control:");
+    if (!password) {
+      toast.error("Action canceled", { description: "Master password is required." });
+      return;
+    }
+
+    const verify = await supabase.rpc("verify_node_master_password", {
+      p_node_id: id,
+      p_password: password,
+      p_context: "session_ctrl_alt_del",
+    });
+    const verifyResult = verify.data?.[0];
+    if (verify.error || !verifyResult?.verified) {
+      toast.error("Password verification failed", {
+        description: verifyResult?.error_code ?? verify.error?.message ?? "invalid_password",
+      });
+      return;
+    }
+
+    await adapterRef.current?.sendInput({ type: "command", command: "ctrl_alt_del" });
+
+    const { data } = await supabase.rpc("record_privileged_event", {
+      p_node_id: id,
+      p_action: "session_ctrl_alt_del",
+      p_request_id: search.requestId ?? null,
+      p_local: search.local ?? false,
+      p_metadata: { node_name: name, command: "ctrl_alt_del" },
+    });
+
+    const result = data?.[0];
+    if (!result?.authorized) {
+      toast.error("Ctrl+Alt+Del denied", { description: result?.denial_reason ?? "request_not_approved" });
+      return;
+    }
+
     toast.info("Ctrl+Alt+Del sent", { description: "Routed through approved session" });
   }
 
-  function disconnect() {
+  async function disconnect() {
+    await adapterRef.current?.disconnect("user_disconnect");
+    adapterRef.current = null;
+
+    await supabase.rpc("record_privileged_event", {
+      p_node_id: id,
+      p_action: "session_end",
+      p_request_id: search.requestId ?? null,
+      p_local: search.local ?? false,
+      p_metadata: { node_name: name, source: "disconnect", connection_state: connectionState },
+    });
+
     toast.success("Session ended");
     navigate({ to: "/" });
   }
@@ -118,7 +176,7 @@ function RemoteSession() {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold">{name}</h1>
           <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">live remote session</div>
@@ -144,6 +202,25 @@ function RemoteSession() {
                 target · {name}
               </div>
             </div>
+          )}
+
+          {viewerState === "agent-offline" && (
+            <div className="absolute inset-0 flex items-center justify-center bg-background/45">
+              <div className="rounded-lg border border-border bg-background/80 px-6 py-5 text-center backdrop-blur">
+                <WifiOff className="mx-auto size-8 text-warning" />
+                <div className="mt-3 text-sm font-semibold">Streaming agent offline</div>
+                <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                  Approval is valid, but the target has no active streaming transport. Deploy the agent from STREAMING.md.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div className="absolute left-2 top-2 rounded bg-black/60 px-2 py-1 font-mono text-[10px] text-white">
+            state: {viewerState} / {connectionState}
+          </div>
+          <div className="absolute right-2 top-2 rounded bg-black/60 px-2 py-1 font-mono text-[10px] text-white">
+            fps: {stats.fps ?? "--"} · latency: {stats.latencyMs ?? "--"}ms
           </div>
         </div>
       </Card>
