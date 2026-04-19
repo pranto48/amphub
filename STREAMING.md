@@ -2,6 +2,8 @@
 
 The remote-session viewer in this app is a **placeholder**. Actual desktop streaming requires software running on each target desktop. This document outlines viable integration paths and how to wire them into the approval-gated session token flow already implemented.
 
+> Protocol details now live in **`REMOTE_PROTOCOL.md`** (channel model, auth, key rotation, backpressure/reconnect, and audit requirements).
+
 ## 1. Apache Guacamole (recommended for RDP/VNC)
 
 - Run `guacd` and `guacamole-client` (or the headless `guacamole-common-js` API) in Docker alongside the central server.

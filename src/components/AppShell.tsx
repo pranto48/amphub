@@ -112,7 +112,7 @@ export function AppShell() {
               <span className="font-mono">remote-desktop-management</span>
               <span className="opacity-50">/</span>
               <FolderTree className="size-3.5" />
-              <span className="font-mono opacity-80">{loc.pathname}</span>
+              <span className="max-w-[40vw] truncate font-mono opacity-80">{loc.pathname}</span>
             </div>
             <div className="ml-auto flex items-center gap-1.5">
               <span className="size-2 rounded-full bg-success pulse-dot text-success" />

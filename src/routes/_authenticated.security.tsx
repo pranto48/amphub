@@ -44,6 +44,10 @@ function SecurityPage() {
     }
   }, [isAdmin]);
 
+  React.useEffect(() => {
+    void loadNodes();
+  }, [loadNodes]);
+
   async function setMaster(node: Node) {
     const v = pwd[node.id]?.trim() ?? "";
     const parsed = z.string().min(8).max(128).safeParse(v);
@@ -53,8 +57,10 @@ function SecurityPage() {
       return;
     }
     setBusy(node.id);
-    const hash = await hashPassword(parsed.data);
-    const { error } = await supabase.from("desktop_nodes").update({ master_password_hash: hash }).eq("id", node.id);
+    const { data, error } = await supabase.rpc("set_node_master_password", {
+      p_node_id: node.id,
+      p_password: parsed.data,
+    });
     setBusy(null);
     if (error) toast.error(error.message);
     else {
@@ -72,6 +78,7 @@ function SecurityPage() {
     setSavingOwn(true);
     const { error } = await supabase.auth.updateUser({ password: parsed.data });
     setSavingOwn(false);
+
     if (error) toast.error(error.message);
     else { toast.success("Password updated"); setNewPwd(""); setConfirmOwnPwd(""); }
   }
@@ -110,7 +117,7 @@ function SecurityPage() {
             <h2 className="text-sm font-semibold">Per-node master passwords</h2>
           </div>
           <p className="mb-4 text-xs text-muted-foreground">
-            Stored as SHA-256 hashes. Used to gate elevated actions on each desktop node.
+            Stored with bcrypt KDF and verified server-side with lockout and throttle controls.
           </p>
           <div className="space-y-3">
             {nodes.map((n) => (
