@@ -1,11 +1,42 @@
-# Docker Deployment (Port 4455 + Local Database)
+# Docker Deployment (Fully Self-Hosted Supabase + App)
 
-This project includes a Docker setup that exposes the app on port **4455** and provisions a local PostgreSQL database container.
+This project now runs against a **fully self-hosted Supabase stack** in Docker, so auth, realtime notifications, and data reads are local (no cloud Supabase dependency).
+
+## Architecture Decision
+
+- ✅ Selected: **Self-hosted Supabase stack**.
+- ❌ Not selected: custom API rewrite to replace all `supabase-js` route usage.
+
+Keeping the existing Supabase client integration avoids a large route-by-route refactor while still removing cloud runtime dependencies.
 
 ## Services
 
-- **app**: RemoteOps web app, exposed on `http://localhost:4455`
-- **db**: Local PostgreSQL database on `localhost:5433`
+- **app**: Amphub web app on `http://localhost:4455`
+- **kong**: local Supabase gateway on `http://localhost:8000`
+- **auth** (`supabase/gotrue`): authentication service
+- **rest** (`postgrest`): Postgres-backed API for table/RPC reads/writes
+- **realtime** (`supabase/realtime`): websocket change notifications
+- **db**: local PostgreSQL database on `localhost:5433`
+
+## Startup Ordering + Health Checks
+
+`docker-compose.yml` defines health checks for every stack component and `depends_on` conditions so startup waits for dependencies:
+
+- `db` must be healthy before `auth`, `rest`, `realtime`.
+- `auth`, `rest`, `realtime` must be healthy before `kong`.
+- `kong` and `db` must be healthy before `app`.
+
+## Environment Wiring
+
+The app points to the local gateway by default:
+
+- `VITE_SUPABASE_URL=http://kong:8000`
+- `SUPABASE_URL=http://kong:8000`
+- `VITE_SUPABASE_PUBLISHABLE_KEY=<local anon key>`
+- `SUPABASE_PUBLISHABLE_KEY=<local anon key>`
+- `SUPABASE_SERVICE_ROLE_KEY=<local service role key>`
+
+You can override any of these with host environment variables when needed.
 
 ## Quick Start
 
@@ -13,54 +44,15 @@ This project includes a Docker setup that exposes the app on port **4455** and p
 docker compose up --build -d
 ```
 
-If you previously built with an older Dockerfile, rebuild without cache:
-
-```bash
-docker compose build --no-cache app
-docker compose up -d
-```
-
 Then open:
+
 - App: `http://localhost:4455`
+- Supabase gateway: `http://localhost:8000`
 
-## Admin bootstrap (single source of truth)
+## Notes
 
-Admin credentials are sourced **only** from the DB container environment variables:
-
-- `BOOTSTRAP_ADMIN_EMAIL`
-- `BOOTSTRAP_ADMIN_PASSWORD`
-
-The startup script at `docker/postgres/init/00-bootstrap-auth.sh` uses those values to:
-
-1. Create/locate the admin account in `auth.users` (Supabase Auth/local equivalent).
-2. Ensure the account has `admin` in `public.user_roles`.
-3. Mark seed completion in `public.bootstrap_seeds` with key `auth_admin_v1` so it does not re-run on every restart.
-
-> If `auth.users` is not present (for example, non-Supabase Postgres), the auth bootstrap is skipped.
-
-## Credential rotation
-
-1. Update `BOOTSTRAP_ADMIN_EMAIL` and/or `BOOTSTRAP_ADMIN_PASSWORD` in your deployment secret source (`.env`, CI secret store, or orchestrator secret).
-2. Rotate the password for the existing auth user in Supabase Auth (Dashboard or admin API) to the new value.
-3. Restart the stack:
-
-```bash
-docker compose up -d
-```
-
-4. Verify login with the new credentials and verify role assignment:
-
-```sql
-select user_id, role from public.user_roles where role = 'admin';
-```
-
-## Environment Variables
-
-The app requires Supabase API settings. In `docker-compose.yml`, these default to local placeholders:
-
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_PUBLISHABLE_KEY`
-- `SUPABASE_URL`
-- `SUPABASE_PUBLISHABLE_KEY`
-
-If you run a local/self-hosted Supabase gateway, set these to that endpoint/key.
+- The gateway routes are defined in `docker/kong/kong.yml` for:
+  - `/auth/v1/*`
+  - `/rest/v1/*`
+  - `/realtime/v1/*`
+- Existing app code in `src/integrations/supabase/client.ts` and route files continues to work unchanged, now against local services.
