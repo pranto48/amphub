@@ -72,6 +72,8 @@ function Dashboard() {
   const [lanMode, setLanMode] = React.useState(true);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [remoteLookup, setRemoteLookup] = React.useState("");
+  const [requestReason, setRequestReason] = React.useState("");
+  const [pendingTimeoutMinutes, setPendingTimeoutMinutes] = React.useState(10);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -123,6 +125,7 @@ function Dashboard() {
   async function requestRemote(node: Node) {
     if (!user) return;
     setBusyId(node.id);
+    await supabase.rpc("expire_access_requests", { p_pending_timeout_minutes: pendingTimeoutMinutes });
     const { data, error } = await supabase
       .from("access_requests")
       .insert({
@@ -132,6 +135,10 @@ function Dashboard() {
         requester_identity: user.user_metadata?.display_name ?? user.email ?? user.id,
         node_name: node.name,
         location_hint: Intl.DateTimeFormat().resolvedOptions().timeZone ?? null,
+        request_reason: requestReason.trim() || null,
+        status_reason_code: "awaiting_admin_decision",
+        status_reason_message: "Waiting for admin review",
+        pending_expires_at: new Date(Date.now() + pendingTimeoutMinutes * 60 * 1000).toISOString(),
       })
       .select()
       .single();
@@ -195,6 +202,25 @@ function Dashboard() {
               <Search className="size-4" /> Request Access
             </Button>
           </div>
+        </div>
+        <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]">
+          <input
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            value={requestReason}
+            onChange={(e) => setRequestReason(e.target.value)}
+            placeholder="Reason for access (shown to admins)"
+          />
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            Pending timeout (min)
+            <input
+              className="h-9 w-20 rounded-md border border-input bg-background px-2 font-mono text-sm"
+              min={1}
+              max={120}
+              type="number"
+              value={pendingTimeoutMinutes}
+              onChange={(e) => setPendingTimeoutMinutes(Math.max(1, Math.min(120, Number(e.target.value) || 10)))}
+            />
+          </label>
         </div>
       </Card>
 

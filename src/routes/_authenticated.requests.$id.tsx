@@ -19,6 +19,10 @@ type Req = {
   status: ReqStatus;
   session_token: string | null;
   expires_at: string | null;
+  request_reason: string | null;
+  status_reason_code: string | null;
+  status_reason_message: string | null;
+  pending_expires_at: string | null;
 };
 
 function RequestPage() {
@@ -31,7 +35,7 @@ function RequestPage() {
     await supabase.rpc("expire_access_requests");
     const { data, error } = await supabase
       .from("access_requests")
-      .select("id,node_id,status,session_token,expires_at")
+      .select("id,node_id,status,session_token,expires_at,request_reason,status_reason_code,status_reason_message,pending_expires_at")
       .eq("id", id)
       .maybeSingle();
     if (error) toast.error(error.message);
@@ -78,6 +82,12 @@ function RequestPage() {
             <p className="mt-1 text-sm text-muted-foreground">
               An administrator has been notified. This page will update automatically.
             </p>
+            {req.request_reason && <p className="mt-2 text-xs text-muted-foreground">Reason: {req.request_reason}</p>}
+            {req.pending_expires_at && (
+              <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+                Auto-expires at {new Date(req.pending_expires_at).toLocaleTimeString()}
+              </p>
+            )}
             <div className="mt-4 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
               request id · {req.id.slice(0, 8)}
             </div>
@@ -135,6 +145,12 @@ function RequestPage() {
             <p className="mt-1 text-sm text-muted-foreground">An administrator rejected this request.</p>
             <Button asChild variant="outline" className="mt-5"><Link to="/">Back to dashboard</Link></Button>
           </>
+        )}
+        {req.status_reason_code && (
+          <div className="mt-5 rounded-md border border-border bg-muted/30 p-3 text-left">
+            <div className="font-mono text-[10px] uppercase text-muted-foreground">Reason code · {req.status_reason_code}</div>
+            {req.status_reason_message && <div className="mt-1 text-xs text-muted-foreground">{req.status_reason_message}</div>}
+          </div>
         )}
       </Card>
     </div>
