@@ -327,6 +327,8 @@ export type Database = {
           p_local?: boolean
           p_node_id: string
           p_request_id?: string
+          p_requester_id?: string
+          p_session_token?: string
         }
         Returns: {
           access_mode: string
@@ -335,9 +337,34 @@ export type Database = {
           matched_request_id: string | null
         }[]
       }
-      expire_access_requests: {
-        Args: Record<PropertyKey, never>
-        Returns: number
+      audit_access_mode_decision: {
+        Args: {
+          p_detected_same_lan: boolean
+          p_detection_source?: string
+          p_effective_mode: string
+          p_manual_lan_mode: boolean
+          p_node_id: string
+          p_override_differs?: boolean
+          p_requester_hints?: string[]
+        }
+        Returns: string
+      }
+      dashboard_nodes_with_lan: {
+        Args: {
+          p_requester_hints?: string[]
+          p_requester_ip?: string
+        }
+        Returns: {
+          id: string
+          lan_detection_source: string | null
+          last_seen: string | null
+          local_ip: string
+          name: string
+          os: string
+          remote_id: string
+          same_lan: boolean
+          status: string
+        }[]
       }
       export_incident_review: {
         Args: {
@@ -361,6 +388,13 @@ export type Database = {
         }
         Returns: boolean
       }
+      lan_ipv4_subnet: {
+        Args: {
+          ip_text: string
+          mask_bits?: number
+        }
+        Returns: string
+      }
       record_privileged_event: {
         Args: {
           p_action: string
@@ -368,6 +402,8 @@ export type Database = {
           p_metadata?: Json
           p_node_id: string
           p_request_id?: string
+          p_requester_id?: string
+          p_session_token?: string
         }
         Returns: {
           authorized: boolean
