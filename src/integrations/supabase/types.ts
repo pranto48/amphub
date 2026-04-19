@@ -88,39 +88,54 @@ export type Database = {
       desktop_nodes: {
         Row: {
           created_at: string
+          failed_attempts: number
           id: string
           last_seen: string | null
+          locked_until: string | null
           local_ip: string
           master_password_hash: string | null
           name: string
           os: string
           owner_id: string | null
+          password_algo: string | null
+          password_updated_at: string | null
+          password_version: number
           remote_id: string
           status: string
           updated_at: string
         }
         Insert: {
           created_at?: string
+          failed_attempts?: number
           id?: string
           last_seen?: string | null
+          locked_until?: string | null
           local_ip: string
           master_password_hash?: string | null
           name: string
           os?: string
           owner_id?: string | null
+          password_algo?: string | null
+          password_updated_at?: string | null
+          password_version?: number
           remote_id: string
           status?: string
           updated_at?: string
         }
         Update: {
           created_at?: string
+          failed_attempts?: number
           id?: string
           last_seen?: string | null
+          locked_until?: string | null
           local_ip?: string
           master_password_hash?: string | null
           name?: string
           os?: string
           owner_id?: string | null
+          password_algo?: string | null
+          password_updated_at?: string | null
+          password_version?: number
           remote_id?: string
           status?: string
           updated_at?: string
@@ -215,6 +230,34 @@ export type Database = {
           authorized: boolean
           denial_reason: string | null
           event_id: string
+        }[]
+      }
+      set_node_master_password: {
+        Args: {
+          p_node_id: string
+          p_password: string
+        }
+        Returns: {
+          error_code: string | null
+          password_algo: string | null
+          password_updated_at: string | null
+          password_version: number | null
+          success: boolean
+        }[]
+      }
+      verify_node_master_password: {
+        Args: {
+          p_context?: string
+          p_node_id: string
+          p_password: string
+        }
+        Returns: {
+          error_code: string | null
+          failed_attempts: number | null
+          locked_until: string | null
+          password_updated_at: string | null
+          password_version: number | null
+          verified: boolean
         }[]
       }
     }
