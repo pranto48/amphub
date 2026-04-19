@@ -99,6 +99,25 @@ function RemoteSession() {
   }
 
   async function sendCAD() {
+    const password = window.prompt("Enter node master password for privileged control:");
+    if (!password) {
+      toast.error("Action canceled", { description: "Master password is required." });
+      return;
+    }
+
+    const verify = await supabase.rpc("verify_node_master_password", {
+      p_node_id: id,
+      p_password: password,
+      p_context: "session_ctrl_alt_del",
+    });
+    const verifyResult = verify.data?.[0];
+    if (verify.error || !verifyResult?.verified) {
+      toast.error("Password verification failed", {
+        description: verifyResult?.error_code ?? verify.error?.message ?? "invalid_password",
+      });
+      return;
+    }
+
     const { data } = await supabase.rpc("record_privileged_event", {
       p_node_id: id,
       p_action: "session_ctrl_alt_del",

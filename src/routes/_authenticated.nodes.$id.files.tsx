@@ -165,6 +165,25 @@ function FileExplorer() {
   }
 
   async function deleteEntry(name: string) {
+    const password = window.prompt("Enter node master password to delete this item:");
+    if (!password) {
+      toast.error("Delete canceled", { description: "Master password is required." });
+      return;
+    }
+
+    const verify = await supabase.rpc("verify_node_master_password", {
+      p_node_id: id,
+      p_password: password,
+      p_context: "file_delete",
+    });
+    const verifyResult = verify.data?.[0];
+    if (verify.error || !verifyResult?.verified) {
+      toast.error("Password verification failed", {
+        description: verifyResult?.error_code ?? verify.error?.message ?? "invalid_password",
+      });
+      return;
+    }
+
     const { data } = await supabase.rpc("record_privileged_event", {
       p_node_id: id,
       p_action: "file_delete",
