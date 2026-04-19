@@ -23,8 +23,13 @@ export type Database = {
           node_id: string
           requested_at: string
           requester_id: string
+          revoked_at: string | null
           session_token: string | null
           status: string
+          token_bound_node_id: string
+          token_bound_requester_id: string
+          token_single_use: boolean
+          token_used_at: string | null
         }
         Insert: {
           decided_at?: string | null
@@ -34,8 +39,13 @@ export type Database = {
           node_id: string
           requested_at?: string
           requester_id: string
+          revoked_at?: string | null
           session_token?: string | null
           status?: string
+          token_bound_node_id?: string
+          token_bound_requester_id?: string
+          token_single_use?: boolean
+          token_used_at?: string | null
         }
         Update: {
           decided_at?: string | null
@@ -45,8 +55,13 @@ export type Database = {
           node_id?: string
           requested_at?: string
           requester_id?: string
+          revoked_at?: string | null
           session_token?: string | null
           status?: string
+          token_bound_node_id?: string
+          token_bound_requester_id?: string
+          token_single_use?: boolean
+          token_used_at?: string | null
         }
         Relationships: [
           {
@@ -88,39 +103,54 @@ export type Database = {
       desktop_nodes: {
         Row: {
           created_at: string
+          failed_attempts: number
           id: string
           last_seen: string | null
+          locked_until: string | null
           local_ip: string
           master_password_hash: string | null
           name: string
           os: string
           owner_id: string | null
+          password_algo: string | null
+          password_updated_at: string | null
+          password_version: number
           remote_id: string
           status: string
           updated_at: string
         }
         Insert: {
           created_at?: string
+          failed_attempts?: number
           id?: string
           last_seen?: string | null
+          locked_until?: string | null
           local_ip: string
           master_password_hash?: string | null
           name: string
           os?: string
           owner_id?: string | null
+          password_algo?: string | null
+          password_updated_at?: string | null
+          password_version?: number
           remote_id: string
           status?: string
           updated_at?: string
         }
         Update: {
           created_at?: string
+          failed_attempts?: number
           id?: string
           last_seen?: string | null
+          locked_until?: string | null
           local_ip?: string
           master_password_hash?: string | null
           name?: string
           os?: string
           owner_id?: string | null
+          password_algo?: string | null
+          password_updated_at?: string | null
+          password_version?: number
           remote_id?: string
           status?: string
           updated_at?: string
@@ -177,6 +207,30 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      admin_decide_access_request: {
+        Args: {
+          p_decision: string
+          p_request_id: string
+          p_single_use?: boolean
+          p_ttl_minutes?: number
+        }
+        Returns: {
+          decided_at: string | null
+          decided_by: string | null
+          expires_at: string | null
+          id: string
+          node_id: string
+          requested_at: string
+          requester_id: string
+          revoked_at: string | null
+          session_token: string | null
+          status: string
+          token_bound_node_id: string
+          token_bound_requester_id: string
+          token_single_use: boolean
+          token_used_at: string | null
+        }
+      }
       authorize_privileged_access: {
         Args: {
           p_local?: boolean
@@ -251,6 +305,34 @@ export type Database = {
           authorized: boolean
           denial_reason: string | null
           event_id: string
+        }[]
+      }
+      set_node_master_password: {
+        Args: {
+          p_node_id: string
+          p_password: string
+        }
+        Returns: {
+          error_code: string | null
+          password_algo: string | null
+          password_updated_at: string | null
+          password_version: number | null
+          success: boolean
+        }[]
+      }
+      verify_node_master_password: {
+        Args: {
+          p_context?: string
+          p_node_id: string
+          p_password: string
+        }
+        Returns: {
+          error_code: string | null
+          failed_attempts: number | null
+          locked_until: string | null
+          password_updated_at: string | null
+          password_version: number | null
+          verified: boolean
         }[]
       }
     }

@@ -3,15 +3,19 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, Hourglass, CheckCircle2, XCircle, ArrowRight } from "lucide-react";
+import {
+  Loader2, Hourglass, CheckCircle2, XCircle, ArrowRight, Ban, TimerOff,
+} from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/requests/$id")({ component: RequestPage });
 
+type ReqStatus = "pending" | "approved" | "denied" | "revoked" | "expired";
+
 type Req = {
   id: string;
   node_id: string;
-  status: string;
+  status: ReqStatus;
   session_token: string | null;
   expires_at: string | null;
 };
@@ -23,6 +27,7 @@ function RequestPage() {
   const [loading, setLoading] = React.useState(true);
 
   const load = React.useCallback(async () => {
+    await supabase.rpc("expire_access_requests");
     const { data, error } = await supabase
       .from("access_requests")
       .select("id,node_id,status,session_token,expires_at")
@@ -36,6 +41,7 @@ function RequestPage() {
   React.useEffect(() => { load(); }, [load]);
 
   React.useEffect(() => {
+    const refresh = window.setInterval(load, 30_000);
     const ch = supabase
       .channel(`req-${id}`)
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "access_requests", filter: `id=eq.${id}` },
@@ -44,13 +50,20 @@ function RequestPage() {
           setReq(next);
           if (next.status === "approved") toast.success("Access granted");
           if (next.status === "denied") toast.error("Access denied");
+          if (next.status === "revoked") toast.error("Approval revoked");
+          if (next.status === "expired") toast.warning("Approval expired");
         })
       .subscribe();
-    return () => { supabase.removeChannel(ch); };
-  }, [id]);
+    return () => {
+      window.clearInterval(refresh);
+      supabase.removeChannel(ch);
+    };
+  }, [id, load]);
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;
   if (!req) return <Card className="p-8">Request not found.</Card>;
+
+  const expiredByTtl = req.status === "approved" && req.expires_at && new Date(req.expires_at).getTime() <= Date.now();
 
   return (
     <div className="mx-auto max-w-lg">
@@ -69,15 +82,20 @@ function RequestPage() {
             </div>
           </>
         )}
-        {req.status === "approved" && (
+        {req.status === "approved" && !expiredByTtl && (
           <>
             <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-success/15 text-success">
               <CheckCircle2 className="size-6" />
             </div>
             <h2 className="mt-4 text-lg font-semibold">Access granted</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Session token issued. You may launch the remote session now.
+              Session token issued with strict TTL. Launch before it expires.
             </p>
+            {req.expires_at && (
+              <p className="mt-2 font-mono text-xs text-muted-foreground">
+                Expires at {new Date(req.expires_at).toLocaleTimeString()}.
+              </p>
+            )}
             <Button
               className="mt-5"
               onClick={() => navigate({
@@ -88,6 +106,28 @@ function RequestPage() {
             >
               Launch session <ArrowRight className="size-4" />
             </Button>
+          </>
+        )}
+        {(req.status === "expired" || expiredByTtl) && (
+          <>
+            <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-muted text-muted-foreground">
+              <TimerOff className="size-6" />
+            </div>
+            <h2 className="mt-4 text-lg font-semibold">Approval expired</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              This approval token is no longer valid. Submit a new request to continue.
+            </p>
+            <Button asChild variant="outline" className="mt-5"><Link to="/">Back to dashboard</Link></Button>
+          </>
+        )}
+        {req.status === "revoked" && (
+          <>
+            <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-destructive/15 text-destructive">
+              <Ban className="size-6" />
+            </div>
+            <h2 className="mt-4 text-lg font-semibold">Approval revoked</h2>
+            <p className="mt-1 text-sm text-muted-foreground">An administrator revoked this approval and invalidated the token.</p>
+            <Button asChild variant="outline" className="mt-5"><Link to="/">Back to dashboard</Link></Button>
           </>
         )}
         {req.status === "denied" && (
