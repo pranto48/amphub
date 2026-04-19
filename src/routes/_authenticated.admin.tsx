@@ -567,9 +567,31 @@ function AdminPanel() {
                   </div>
                   <div className="font-mono text-muted-foreground">started {new Date(s.started_at).toLocaleString()} · last {new Date(s.last_seen_at).toLocaleTimeString()}</div>
                 </div>
-                <Button size="sm" variant="destructive" onClick={() => void terminateSession(s)}>
-                  <Ban className="size-4" /> Terminate
-                </Button>
+                <div className="flex items-center gap-2">
+                  {s.request_id && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={async () => {
+                        const { error } = await supabase.rpc("admin_revoke_session_token", {
+                          p_request_id: s.request_id,
+                          p_reason: "admin_revoke_active_session",
+                        });
+                        if (error) {
+                          notify("error", "Revoke failed", error.message);
+                          return;
+                        }
+                        notify("warning", "Session access revoked", `Revoked approval for ${nodeMap[s.node_id] ?? s.node_id.slice(0, 8)}.`);
+                        await load();
+                      }}
+                    >
+                      <CircleOff className="size-4" /> Revoke active session
+                    </Button>
+                  )}
+                  <Button size="sm" variant="destructive" onClick={() => void terminateSession(s)}>
+                    <Ban className="size-4" /> Terminate
+                  </Button>
+                </div>
               </div>
             ))}
           </div>
