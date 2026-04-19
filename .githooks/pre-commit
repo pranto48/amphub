@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "Running UTF-8 validation for staged files..."
+npm run validate:utf8:staged
+
+echo "Running formatting check..."
+npm run format:check
+
+echo "Running lint checks..."
+npm run lint
+
+echo "Running typecheck..."
+npm run typecheck
+
+echo "Running route generation check..."
+npm run routes:check
