@@ -92,11 +92,6 @@ function RequestPage() {
             <p className="mt-1 text-sm text-muted-foreground">
               Session token issued with strict TTL. Launch before it expires.
             </p>
-            {req.expires_at && (
-              <p className="mt-2 font-mono text-xs text-muted-foreground">
-                Expires at {new Date(req.expires_at).toLocaleTimeString()}.
-              </p>
-            )}
             <Button
               className="mt-5"
               onClick={() => navigate({

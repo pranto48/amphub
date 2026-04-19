@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
-import { RouteLoadingState } from "@/components/route-state";
+import { canAccessApprovedSession } from "@/lib/session-access";
 
 export const Route = createFileRoute("/_authenticated/nodes/$id/session")({
   validateSearch: z.object({
@@ -18,14 +18,6 @@ export const Route = createFileRoute("/_authenticated/nodes/$id/session")({
   }),
   component: RemoteSession,
 });
-
-const badgeVariantByState: Record<ConnectionState, "default" | "secondary" | "outline" | "destructive"> = {
-  disconnected: "outline",
-  connecting: "secondary",
-  connected: "default",
-  reconnecting: "secondary",
-  failed: "destructive",
-};
 
 function RemoteSession() {
   const { id } = Route.useParams();
@@ -37,14 +29,8 @@ function RemoteSession() {
   const [loading, setLoading] = React.useState(true);
   const [authorized, setAuthorized] = React.useState(false);
   const [authChecked, setAuthChecked] = React.useState(false);
-  const [denialReason, setDenialReason] = React.useState<string | null>(null);
-  const [connectionState, setConnectionState] = React.useState<ConnectionState>("disconnected");
-  const [stats, setStats] = React.useState<StreamStats>({ latencyMs: null, fps: null, lastFrameAt: null });
-
   const containerRef = React.useRef<HTMLDivElement>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
-  const sessionStartedRef = React.useRef(false);
-  const adapterRef = React.useRef<RemoteStreamAdapter | null>(null);
 
   React.useEffect(() => {
     supabase.from("desktop_nodes").select("name,remote_id,local_ip,os").eq("id", id).maybeSingle().then(({ data }) => {
@@ -56,87 +42,55 @@ function RemoteSession() {
   React.useEffect(() => {
     let cancelled = false;
     async function checkAccess() {
-      if (!user) {
+      if (search.local) {
         if (!cancelled) {
-          setAuthorized(false);
-          setDenialReason("request_not_approved");
+          setAuthorized(true);
           setAuthChecked(true);
         }
         return;
       }
-
-      const { data, error } = await supabase.rpc("authorize_privileged_access", {
-        p_node_id: id,
-        p_request_id: search.requestId ?? null,
-        p_local: search.local ?? false,
+      if (!user || !search.requestId) {
+        if (!cancelled) {
+          setAuthorized(false);
+          setAuthChecked(true);
+        }
+        return;
+      }
+      const ok = await canAccessApprovedSession({
+        requestId: search.requestId,
+        nodeId: id,
+        userId: user.id,
       });
-
-      const result = data?.[0];
-      const ok = !error && !!result?.authorized;
       if (!cancelled) {
         setAuthorized(ok);
-        setDenialReason(result?.denial_reason ?? (error ? "request_not_approved" : null));
         setAuthChecked(true);
       }
     }
     checkAccess();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [id, search.local, search.requestId, user]);
 
   React.useEffect(() => {
-    if (!authorized || !canvasRef.current || !containerRef.current) return;
-
-    let adapter: MockStreamAdapter;
-    const syncStats = () => {
-      if (!adapter) return;
-      setStats(adapter.getStats());
-    };
-
-    adapter = new MockStreamAdapter(
-      (nextState) => setConnectionState(nextState),
-      syncStats,
-    );
-    adapterRef.current = adapter;
-
-    const syncResize = async () => {
-      if (!containerRef.current) return;
-      const { width, height } = containerRef.current.getBoundingClientRect();
-      await adapter.resize({ width, height });
-      setStats(adapter.getStats());
-    };
-
-    void adapter.connect({
-      canvas: canvasRef.current,
-      nodeId: id,
-      local: search.local ?? false,
-      requestId: search.requestId,
-    }).then(syncResize);
-
-    const observer = new ResizeObserver(() => {
-      void syncResize();
-    });
-    observer.observe(containerRef.current);
-
-    const interval = window.setInterval(() => {
-      setStats(adapter.getStats());
-    }, 1000);
-
-    const fullscreenListener = () => {
-      void syncResize();
-    };
-    document.addEventListener("fullscreenchange", fullscreenListener);
-
-    return () => {
-      observer.disconnect();
-      window.clearInterval(interval);
-      document.removeEventListener("fullscreenchange", fullscreenListener);
-      void adapter.disconnect("unmount");
-      adapterRef.current = null;
-      setConnectionState("disconnected");
-    };
-  }, [authorized, id, search.local, search.requestId]);
+    if (!authorized) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    canvas.width = 1280;
+    canvas.height = 720;
+    ctx.fillStyle = "#07090f";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#1f2937";
+    ctx.fillRect(48, 48, canvas.width - 96, canvas.height - 96);
+    ctx.fillStyle = "#7dd3fc";
+    ctx.font = "600 24px Inter, system-ui, sans-serif";
+    ctx.fillText("Secure Remote Session", 90, 110);
+    ctx.fillStyle = "#a1a1aa";
+    ctx.font = "16px ui-monospace, SFMono-Regular, Menlo, monospace";
+    ctx.fillText(`Node: ${name}`, 90, 150);
+    ctx.fillText(`Transport: ${search.local ? "LAN Direct" : "Approval-Gated Remote Token"}`, 90, 176);
+    ctx.fillText("Streaming pipeline placeholder (WebRTC/RDP/VNC bridge)", 90, 204);
+  }, [authorized, name, search.local]);
 
   function fullscreen() {
     const el = containerRef.current;
@@ -198,53 +152,11 @@ function RemoteSession() {
     navigate({ to: "/" });
   }
 
-
-  React.useEffect(() => {
-    if (!authorized) return;
-    const timer = window.setInterval(() => {
-      void supabase.rpc("record_privileged_event", {
-        p_node_id: id,
-        p_action: "session_heartbeat",
-        p_request_id: search.requestId ?? null,
-        p_local: search.local ?? false,
-        p_metadata: { node_name: name },
-      });
-    }, 30_000);
-    return () => window.clearInterval(timer);
-  }, [authorized, id, name, search.local, search.requestId]);
-
-  React.useEffect(() => {
-    if (!authorized || sessionStartedRef.current) return;
-    sessionStartedRef.current = true;
-
-    void supabase.rpc("record_privileged_event", {
-      p_node_id: id,
-      p_action: "session_start",
-      p_request_id: search.requestId ?? null,
-      p_local: search.local ?? false,
-      p_metadata: { node_name: name },
-    });
-
-    return () => {
-      void supabase.rpc("record_privileged_event", {
-        p_node_id: id,
-        p_action: "session_end",
-        p_request_id: search.requestId ?? null,
-        p_local: search.local ?? false,
-        p_metadata: { node_name: name, source: "unmount", connection_state: connectionState },
-      });
-    };
-  }, [authorized, connectionState, id, name, search.local, search.requestId]);
-
-  if (loading || !authChecked) {
-    return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;
-  }
-
-  if (loading || !authChecked) return <RouteLoadingState label="Loading remote session" withSkeleton />;
+  if (loading || !authChecked) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;
   if (!authorized) {
     return (
       <Card className="p-8 text-center text-sm text-muted-foreground">
-        Session denied: {denialReason ?? "request_not_approved"}. This route requires LAN mode with policy guard or an approved, non-expired request token.
+        Session denied: this route requires LAN mode or an approved, non-expired request token.
       </Card>
     );
   }
@@ -256,22 +168,28 @@ function RemoteSession() {
           <h1 className="text-lg font-semibold">{name}</h1>
           <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">live remote session</div>
         </div>
-        <div className="flex w-full flex-wrap items-center justify-end gap-2 md:w-auto">
-          <Button size="sm" variant="outline" onClick={sendCAD} aria-label="Send Ctrl Alt Del">
-            <Keyboard className="size-4" aria-hidden="true" /> Ctrl+Alt+Del
-          </Button>
-          <Button size="sm" variant="outline" onClick={fullscreen} aria-label="Toggle fullscreen">
-            <Maximize2 className="size-4" aria-hidden="true" /> Fullscreen
-          </Button>
-          <Button size="sm" variant="destructive" onClick={disconnect} aria-label="Disconnect session">
-            <Power className="size-4" aria-hidden="true" /> Disconnect
-          </Button>
+        <div className="flex flex-wrap items-center gap-2 justify-end">
+          <Button size="sm" variant="outline" onClick={sendCAD}><Keyboard className="size-4" /> Ctrl+Alt+Del</Button>
+          <Button size="sm" variant="outline" onClick={fullscreen}><Maximize2 className="size-4" /> Fullscreen</Button>
+          <Button size="sm" variant="destructive" onClick={disconnect}><Power className="size-4" /> Disconnect</Button>
         </div>
       </div>
 
       <Card ref={containerRef} className="relative overflow-hidden border-primary/30 p-0">
         <div className="viewer-grid relative aspect-video w-full bg-background">
           <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
+          <div className="absolute inset-0 flex items-center justify-center bg-background/45">
+            <div className="rounded-lg border border-border bg-background/80 px-6 py-5 text-center backdrop-blur">
+              <ShieldAlert className="mx-auto size-8 text-warning" />
+              <div className="mt-3 text-sm font-semibold">Streaming agent not connected</div>
+              <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                Approval-gated session token is valid. To render an actual desktop stream, deploy a streaming agent (RDP/VNC/WebRTC) on the target host. See <span className="font-mono text-primary">STREAMING.md</span> for integration paths.
+              </p>
+              <div className="mt-3 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                target · {name}
+              </div>
+            </div>
+          </div>
         </div>
       </Card>
     </div>

@@ -16,11 +16,8 @@ type Node = {
   id: string;
   name: string;
   remote_id: string;
-  password_algo: string | null;
-  password_updated_at: string | null;
-  password_version: number | null;
-  failed_attempts: number | null;
-  locked_until: string | null;
+  master_password_hash: string | null;
+  updated_at: string;
 };
 
 function passwordStrength(password: string) {
@@ -40,21 +37,16 @@ function SecurityPage() {
   const { isAdmin } = useAuth();
   const [nodes, setNodes] = React.useState<Node[]>([]);
   const [pwd, setPwd] = React.useState<Record<string, string>>({});
+  const [confirmPwd, setConfirmPwd] = React.useState<Record<string, string>>({});
   const [busy, setBusy] = React.useState<string | null>(null);
   const [newPwd, setNewPwd] = React.useState("");
-  const [confirmNewPwd, setConfirmNewPwd] = React.useState("");
+  const [confirmOwnPwd, setConfirmOwnPwd] = React.useState("");
   const [savingOwn, setSavingOwn] = React.useState(false);
   const [lastOwnUpdateAt, setLastOwnUpdateAt] = React.useState<string | null>(null);
 
-  const ownStrength = React.useMemo(() => passwordStrength(newPwd), [newPwd]);
-
-  const loadNodes = React.useCallback(() => {
-    if (!isAdmin) return;
-    supabase
-      .from("desktop_nodes")
-      .select("id,name,remote_id,password_algo,password_updated_at,password_version,failed_attempts,locked_until")
-      .order("name")
-      .then(({ data }) => {
+  React.useEffect(() => {
+    if (isAdmin) {
+      supabase.from("desktop_nodes").select("id,name,remote_id,master_password_hash,updated_at").order("name").then(({ data }) => {
         setNodes((data ?? []) as Node[]);
       });
   }, [isAdmin]);
@@ -66,59 +58,35 @@ function SecurityPage() {
   async function setMaster(node: Node) {
     const v = pwd[node.id]?.trim() ?? "";
     const parsed = z.string().min(8).max(128).safeParse(v);
-    if (!parsed.success) {
-      toast.error("Master password must be 8–128 chars");
+    if (!parsed.success) { toast.error("Master password must be 8–128 chars"); return; }
+    if (parsed.data !== (confirmPwd[node.id]?.trim() ?? "")) {
+      toast.error("Master password confirmation does not match");
       return;
     }
-
     setBusy(node.id);
     const { data, error } = await supabase.rpc("set_node_master_password", {
       p_node_id: node.id,
       p_password: parsed.data,
     });
     setBusy(null);
-
-    const result = data?.[0];
-    if (error) {
-      toast.error(error.message);
-      return;
+    if (error) toast.error(error.message);
+    else {
+      toast.success(`Master password updated for ${node.name}`);
+      setPwd((p) => ({ ...p, [node.id]: "" }));
+      setConfirmPwd((p) => ({ ...p, [node.id]: "" }));
+      setNodes((prev) => prev.map((n) => (n.id === node.id ? { ...n, master_password_hash: hash, updated_at: new Date().toISOString() } : n)));
     }
-
-    if (!result?.success) {
-      toast.error("Password update failed", { description: result?.error_code ?? "unknown_error" });
-      return;
-    }
-
-    toast.success(`Master password updated for ${node.name}`, {
-      description: `Algorithm: ${result.password_algo} · Version ${result.password_version}`,
-    });
-    setPwd((p) => ({ ...p, [node.id]: "" }));
-    loadNodes();
   }
 
   async function changeOwn() {
     const parsed = z.string().min(8).max(128).safeParse(newPwd);
-    if (!parsed.success) {
-      toast.error("Password must be 8–128 chars");
-      return;
-    }
-    if (newPwd !== confirmNewPwd) {
-      toast.error("Passwords do not match", { description: "Please confirm your new password." });
-      return;
-    }
-
+    if (!parsed.success) { toast.error("Password must be 8–128 chars"); return; }
+    if (parsed.data !== confirmOwnPwd) { toast.error("Password confirmation does not match"); return; }
     setSavingOwn(true);
     const { error } = await supabase.auth.updateUser({ password: parsed.data });
     setSavingOwn(false);
-    if (error) {
-      toast.error("Password update failed", { description: error.message });
-    } else {
-      const nowIso = new Date().toISOString();
-      setLastOwnUpdateAt(nowIso);
-      toast.success("Password updated", { description: "Your account password was changed successfully." });
-      setNewPwd("");
-      setConfirmNewPwd("");
-    }
+    if (error) toast.error(error.message);
+    else { toast.success("Password updated"); setNewPwd(""); setConfirmOwnPwd(""); }
   }
 
   return (
@@ -133,28 +101,15 @@ function SecurityPage() {
           <Lock className="size-4 text-primary" />
           <h2 className="text-sm font-semibold">Change your password</h2>
         </div>
-        <div className="space-y-3 max-w-md">
+        <div className="grid max-w-xl gap-2 md:grid-cols-[1fr_1fr_auto] md:items-end">
           <div className="space-y-1.5">
             <Label htmlFor="newpwd">New password</Label>
             <Input id="newpwd" type="password" value={newPwd} onChange={(e) => setNewPwd(e.target.value)} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="confirm-newpwd">Confirm new password</Label>
-            <Input
-              id="confirm-newpwd"
-              type="password"
-              value={confirmNewPwd}
-              onChange={(e) => setConfirmNewPwd(e.target.value)}
-            />
+            <Label htmlFor="confirmOwnPwd">Confirm password</Label>
+            <Input id="confirmOwnPwd" type="password" value={confirmOwnPwd} onChange={(e) => setConfirmOwnPwd(e.target.value)} />
           </div>
-          <div className="text-xs text-muted-foreground">
-            Strength: <span className={ownStrength.className}>{ownStrength.label}</span>
-          </div>
-          {lastOwnUpdateAt && (
-            <div className="text-xs text-muted-foreground">
-              Last updated: {new Date(lastOwnUpdateAt).toLocaleString()}
-            </div>
-          )}
           <Button onClick={changeOwn} disabled={savingOwn}>
             {savingOwn && <Loader2 className="size-4 animate-spin" />} Update
           </Button>
@@ -172,29 +127,35 @@ function SecurityPage() {
           </p>
           <div className="space-y-3">
             {nodes.map((n) => (
-              <div key={n.id} className="rounded-md border border-border p-3">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-medium">{n.name}</div>
-                    <div className="font-mono text-[10px] text-muted-foreground">{n.remote_id}</div>
-                  </div>
-                  <div className="text-right text-[11px] text-muted-foreground">
-                    <div>Algo: {n.password_algo ?? "not_set"}</div>
-                    <div>Version: {n.password_version ?? 0}</div>
-                    <div>Updated: {n.password_updated_at ? new Date(n.password_updated_at).toLocaleString() : "never"}</div>
-                    {n.locked_until && (
-                      <div className="text-destructive">Locked until: {new Date(n.locked_until).toLocaleTimeString()}</div>
-                    )}
-                    {!!n.failed_attempts && n.failed_attempts > 0 && <div>Failed attempts: {n.failed_attempts}</div>}
+              <div key={n.id} className="space-y-3 rounded-md border border-border p-3">
+                <div className="flex-1">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="text-sm font-medium">{n.name}</div>
+                      <div className="font-mono text-[10px] text-muted-foreground">{n.remote_id}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {n.master_password_hash ? "Configured" : "Not set"}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">
+                        Updated {new Date(n.updated_at).toLocaleString()}
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <div className="flex items-end gap-3">
+                <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto] md:items-end">
                   <Input
                     type="password"
                     placeholder="New master password"
                     value={pwd[n.id] ?? ""}
                     onChange={(e) => setPwd((p) => ({ ...p, [n.id]: e.target.value }))}
-                    className="max-w-xs"
+                  />
+                  <Input
+                    type="password"
+                    placeholder="Confirm master password"
+                    value={confirmPwd[n.id] ?? ""}
+                    onChange={(e) => setConfirmPwd((p) => ({ ...p, [n.id]: e.target.value }))}
                   />
                   <Button size="sm" onClick={() => setMaster(n)} disabled={busy === n.id}>
                     {busy === n.id ? <Loader2 className="size-4 animate-spin" /> : "Set"}

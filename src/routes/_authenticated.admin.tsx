@@ -135,53 +135,34 @@ function AdminPanel() {
       .channel("admin-requests")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "access_requests" }, (payload) => {
         const r = payload.new as ReqRow;
-        notify(
-          "warning",
-          "New access request",
-          `${r.requester_identity ?? r.requester_id.slice(0, 8)} requested ${r.node_name ?? r.node_id.slice(0, 8)} · ${r.location_hint ?? "unknown location"}`,
-        );
+        toast.warning("New access request", { description: `${nodeMap[r.node_id] ?? `Node ${r.node_id.slice(0, 8)}`} awaiting approval` });
         setPending((p) => [r, ...p]);
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "access_requests" }, () => load())
       .on("postgres_changes", { event: "*", schema: "public", table: "active_sessions" }, () => load())
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "audit_log" }, () => load())
       .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [isAdmin, load, nodeMap]);
 
-    return () => {
-      window.clearInterval(cleanup);
-      supabase.removeChannel(ch);
-    };
-  }, [isAdmin, load, notify]);
-
-  async function decide(req: ReqRow, decision: "approved" | "denied" | "revoked") {
-    const { data, error } = await supabase.rpc("admin_decide_access_request", {
-      p_request_id: req.id,
-      p_decision: decision,
-      p_single_use: true,
-      p_ttl_minutes: 10,
-    });
-
-    if (error) {
-      notify("error", "Decision failed", error.message);
-      return;
-    }
-
-    const updated = (Array.isArray(data) ? data[0] : data) as ReqRow | null;
-    if (updated?.status === "approved") {
-      notify("success", "Approved", "Token issued with strict TTL.");
-    } else if (updated?.status === "denied") {
-      notify("info", "Denied", `${req.requester_identity ?? req.requester_id.slice(0, 8)} denied`);
-    } else {
-      notify("warning", "Revoked", "Session token has been invalidated.");
-    }
-
-    load();
-  }
-
-  async function terminateSession(session: ActiveSession) {
-    const { error } = await supabase.rpc("admin_terminate_session", {
-      p_session_id: session.id,
-      p_reason: "admin_panel_terminate",
+  async function decide(req: ReqRow, approve: boolean) {
+    if (!user) return;
+    const update = approve
+      ? {
+          status: "approved",
+          decided_at: new Date().toISOString(),
+          decided_by: user.id,
+          session_token: crypto.randomUUID().replace(/-/g, ""),
+          expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        }
+      : { status: "denied", decided_at: new Date().toISOString(), decided_by: user.id };
+    const { error } = await supabase.from("access_requests").update(update).eq("id", req.id);
+    if (error) { toast.error(error.message); return; }
+    await supabase.from("audit_log").insert({
+      actor_id: user.id,
+      action: approve ? "approve_access" : "deny_access",
+      target: req.node_id,
+      metadata: { request_id: req.id },
     });
 
     if (error) {

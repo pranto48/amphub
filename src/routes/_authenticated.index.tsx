@@ -141,20 +141,6 @@ function Dashboard() {
     navigate({ to: "/requests/$id", params: { id: data.id } });
   }
 
-  async function connectNode(node: Node) {
-    if (node.status !== "online") return;
-
-    const effectiveLocal = lanMode && node.same_lan;
-    await auditModeDecision(node, effectiveLocal);
-
-    if (effectiveLocal) {
-      await localAccess(node);
-      return;
-    }
-
-    await requestRemote(node);
-  }
-
   function quickConnect() {
     const normalized = remoteLookup.trim();
     if (!normalized) return;
@@ -198,7 +184,7 @@ function Dashboard() {
               AnyDesk-style access request using a node Remote ID.
             </p>
           </div>
-          <div className="flex w-full max-w-lg flex-wrap items-center gap-2 sm:flex-nowrap">
+          <div className="flex w-full max-w-lg items-center gap-2">
             <input
               className="h-9 w-full rounded-md border border-input bg-background px-3 font-mono text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
               value={remoteLookup}
@@ -259,37 +245,37 @@ function Dashboard() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-wider">
-                    <Badge variant={n.same_lan ? "default" : "secondary"}>{n.same_lan ? "same_lan" : "remote_only"}</Badge>
-                    {n.lan_detection_source && (
-                      <Badge variant="outline">{n.lan_detection_source}</Badge>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-2 pt-1">
-                    <Button
-                      size="sm"
-                      className="flex-1"
-                      disabled={busyId === n.id || n.status !== "online"}
-                      onClick={() => connectNode(n)}
-                    >
-                      {busyId === n.id ? <Loader2 className="size-4 animate-spin" /> : effectiveLocal ? <Wifi className="size-4" /> : <ArrowRightLeft className="size-4" />}
-                      {effectiveLocal ? "Connect (LAN)" : "Request Remote"}
-                    </Button>
-                    <Badge variant="outline" className="font-mono text-[10px]">
-                      {n.status === "online" ? "READY" : "OFFLINE"}
-                    </Badge>
-                  </div>
-
-                  {overrideDiffers && (
-                    <div className="rounded-md border border-warning/30 bg-warning/10 px-2 py-1 font-mono text-[10px] text-warning">
-                      Override differs from detection: manual {lanMode ? "LAN" : "REMOTE"} vs detected {n.same_lan ? "SAME_LAN" : "REMOTE_ONLY"}.
-                    </div>
-                  )}
+                <div className="flex items-center gap-2 pt-1">
+                  <Button
+                    size="sm"
+                    className="flex-1"
+                    disabled={n.status !== "online" || !lanMode}
+                    onClick={() => localAccess(n)}
+                  >
+                    <Wifi className="size-4" /> Local Access
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="flex-1"
+                    disabled={busyId === n.id || n.status !== "online"}
+                    onClick={() => requestRemote(n)}
+                  >
+                    {busyId === n.id ? <Loader2 className="size-4 animate-spin" /> : <ArrowRightLeft className="size-4" />}
+                    Remote Access
+                  </Button>
+                  <Badge variant="outline" className="font-mono text-[10px]">
+                    {n.status === "online" ? "READY" : "OFFLINE"}
+                  </Badge>
                 </div>
-              </Card>
-            );
-          })}
+                {!lanMode && (
+                  <div className="rounded-md border border-warning/30 bg-warning/10 px-2 py-1 font-mono text-[10px] text-warning">
+                    Remote mode enabled: local-connect path disabled.
+                  </div>
+                )}
+              </div>
+            </Card>
+          ))}
         </div>
       )}
     </div>

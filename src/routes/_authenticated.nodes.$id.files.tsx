@@ -11,13 +11,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
-import { RouteEmptyState, RouteLoadingState } from "@/components/route-state";
+import { canAccessApprovedSession } from "@/lib/session-access";
 
 export const Route = createFileRoute("/_authenticated/nodes/$id/files")({
   validateSearch: z.object({
     local: z.coerce.boolean().optional(),
     requestId: z.string().uuid().optional(),
-    sessionToken: z.string().min(8).optional(),
   }),
   component: FileExplorer,
 });
@@ -100,9 +99,6 @@ function FileExplorer() {
   const [loading, setLoading] = React.useState(true);
   const [authorized, setAuthorized] = React.useState(false);
   const [authChecked, setAuthChecked] = React.useState(false);
-  const [denialReason, setDenialReason] = React.useState<string | null>(null);
-  const [activeOp, setActiveOp] = React.useState<string | null>(null);
-  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   React.useEffect(() => {
     supabase.from("desktop_nodes").select("name").eq("id", id).maybeSingle().then(({ data }) => {
@@ -114,33 +110,33 @@ function FileExplorer() {
   React.useEffect(() => {
     let cancelled = false;
     async function checkAccess() {
-      if (!user) {
+      if (search.local) {
         if (!cancelled) {
-          setAuthorized(false);
-          setDenialReason("request_not_approved");
+          setAuthorized(true);
           setAuthChecked(true);
         }
         return;
       }
-
-      const { data, error } = await supabase.rpc("authorize_privileged_access", {
-        p_node_id: id,
-        p_request_id: search.requestId ?? null,
-        p_requester_id: user.id,
-        p_session_token: search.sessionToken ?? null,
-        p_local: search.local ?? false,
+      if (!user || !search.requestId) {
+        if (!cancelled) {
+          setAuthorized(false);
+          setAuthChecked(true);
+        }
+        return;
+      }
+      const ok = await canAccessApprovedSession({
+        requestId: search.requestId,
+        nodeId: id,
+        userId: user.id,
       });
-      const result = data?.[0];
-      const ok = !error && !!result?.authorized;
       if (!cancelled) {
         setAuthorized(ok);
-        setDenialReason(result?.denial_reason ?? (error ? "request_not_approved" : null));
         setAuthChecked(true);
       }
     }
     checkAccess();
     return () => { cancelled = true; };
-  }, [id, search.local, search.requestId, search.sessionToken, user]);
+  }, [id, search.local, search.requestId, user]);
 
   const current = getDir(tree, path);
   const canCreateFolder = isAdmin;
@@ -285,14 +281,12 @@ function FileExplorer() {
     toast.info(`Downloading ${name}…`, { description: "Streaming via approved session" });
   }
 
-  if (loading) return <RouteLoadingState label="Loading file explorer" withSkeleton />;
-  if (!authChecked) return <RouteLoadingState label="Validating file explorer access" />;
+  if (loading) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;
+  if (!authChecked) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;
   if (!authorized) {
     return (
-      <Card className="space-y-2 p-8 text-center text-sm text-muted-foreground">
-        <div className="font-medium text-foreground">File explorer unavailable</div>
-        <div>{denialMessage(denialReason)}</div>
-        <div className="font-mono text-xs">reason={denialReason ?? "request_not_approved"}</div>
+      <Card className="p-8 text-center text-sm text-muted-foreground">
+        This file explorer requires LAN access or an approved, non-expired remote session.
       </Card>
     );
   }
