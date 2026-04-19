@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { useAuth } from "@/lib/auth-context";
+import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/login")({ component: LoginPage });
@@ -35,7 +36,17 @@ function LoginPage() {
     const { error } = await signIn(parsed.data.email, parsed.data.password);
     setBusy(false);
     if (error) toast.error(error);
-    else { toast.success("Authenticated"); navigate({ to: "/" }); }
+    else {
+      const { data: userData } = await supabase.auth.getUser();
+      void supabase.from("audit_log").insert({
+        actor_id: userData.user?.id,
+        action: "auth_login",
+        target: userData.user?.id ?? null,
+        metadata: { email: parsed.data.email },
+      });
+      toast.success("Authenticated");
+      navigate({ to: "/" });
+    }
   }
 
   return (
