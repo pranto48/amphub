@@ -7,24 +7,28 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import {
-  Loader2, Check, X, ShieldAlert, Activity, ScrollText,
+  Loader2, Check, X, ShieldAlert, Activity, ScrollText, Ban,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/admin")({ component: AdminPanel });
+
+type ReqStatus = "pending" | "approved" | "denied" | "revoked" | "expired";
 
 type ReqRow = {
   id: string;
   node_id: string;
   requester_id: string;
-  status: string;
+  status: ReqStatus;
   requested_at: string;
+  expires_at: string | null;
 };
 type Audit = { id: string; action: string; target: string | null; created_at: string };
 
 function AdminPanel() {
-  const { isAdmin, user } = useAuth();
+  const { isAdmin } = useAuth();
   const navigate = useNavigate();
   const [pending, setPending] = React.useState<ReqRow[]>([]);
+  const [approved, setApproved] = React.useState<ReqRow[]>([]);
   const [audit, setAudit] = React.useState<Audit[]>([]);
   const [nodeMap, setNodeMap] = React.useState<Record<string, string>>({});
   const [loading, setLoading] = React.useState(true);
@@ -35,11 +39,13 @@ function AdminPanel() {
 
   const load = React.useCallback(async () => {
     const [{ data: reqs }, { data: nodes }, { data: a }] = await Promise.all([
-      supabase.from("access_requests").select("*").eq("status", "pending").order("requested_at", { ascending: false }),
+      supabase.from("access_requests").select("id,node_id,requester_id,status,requested_at,expires_at").in("status", ["pending", "approved"]).order("requested_at", { ascending: false }),
       supabase.from("desktop_nodes").select("id,name"),
       supabase.from("audit_log").select("id,action,target,created_at").order("created_at", { ascending: false }).limit(20),
     ]);
-    setPending((reqs ?? []) as ReqRow[]);
+    const all = (reqs ?? []) as ReqRow[];
+    setPending(all.filter((r) => r.status === "pending"));
+    setApproved(all.filter((r) => r.status === "approved"));
     setNodeMap(Object.fromEntries((nodes ?? []).map((n: { id: string; name: string }) => [n.id, n.name])));
     setAudit((a ?? []) as Audit[]);
     setLoading(false);
@@ -49,6 +55,11 @@ function AdminPanel() {
 
   React.useEffect(() => {
     if (!isAdmin) return;
+    const cleanup = window.setInterval(() => {
+      supabase.rpc("expire_access_requests");
+      load();
+    }, 60_000);
+
     const ch = supabase
       .channel("admin-requests")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "access_requests" }, (payload) => {
@@ -58,30 +69,31 @@ function AdminPanel() {
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "access_requests" }, () => load())
       .subscribe();
-    return () => { supabase.removeChannel(ch); };
+    return () => {
+      window.clearInterval(cleanup);
+      supabase.removeChannel(ch);
+    };
   }, [isAdmin, load]);
 
-  async function decide(req: ReqRow, approve: boolean) {
-    if (!user) return;
-    const update = approve
-      ? {
-          status: "approved",
-          decided_at: new Date().toISOString(),
-          decided_by: user.id,
-          session_token: crypto.randomUUID().replace(/-/g, ""),
-          expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-        }
-      : { status: "denied", decided_at: new Date().toISOString(), decided_by: user.id };
-    const { error } = await supabase.from("access_requests").update(update).eq("id", req.id);
-    if (error) { toast.error(error.message); return; }
-    await supabase.from("audit_log").insert({
-      actor_id: user.id,
-      action: approve ? "approve_access" : "deny_access",
-      target: req.node_id,
-      metadata: { request_id: req.id },
+  async function decide(req: ReqRow, decision: "approved" | "denied" | "revoked") {
+    const { data, error } = await supabase.rpc("admin_decide_access_request", {
+      p_request_id: req.id,
+      p_decision: decision,
+      p_single_use: true,
+      p_ttl_minutes: 10,
     });
-    toast.success(approve ? "Approved" : "Denied");
-    setPending((p) => p.filter((r) => r.id !== req.id));
+
+    if (error) { toast.error(error.message); return; }
+
+    const updated = (Array.isArray(data) ? data[0] : data) as ReqRow | null;
+    if (updated?.status === "approved") {
+      toast.success("Approved", { description: "Token issued with strict TTL." });
+    } else if (updated?.status === "denied") {
+      toast.success("Denied");
+    } else {
+      toast.success("Revoked", { description: "Session token has been invalidated." });
+    }
+
     load();
   }
 
@@ -117,13 +129,40 @@ function AdminPanel() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button size="sm" variant="outline" onClick={() => decide(r, false)}>
+                  <Button size="sm" variant="outline" onClick={() => decide(r, "denied")}>
                     <X className="size-4" /> Deny
                   </Button>
-                  <Button size="sm" onClick={() => decide(r, true)}>
+                  <Button size="sm" onClick={() => decide(r, "approved")}>
                     <Check className="size-4" /> Approve
                   </Button>
                 </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card className="p-4">
+        <div className="mb-3 flex items-center gap-2">
+          <Ban className="size-4 text-destructive" />
+          <h2 className="text-sm font-semibold">Active approvals</h2>
+          <Badge variant="outline" className="font-mono">{approved.length}</Badge>
+        </div>
+        {approved.length === 0 ? (
+          <div className="py-8 text-center text-sm text-muted-foreground">No active approvals.</div>
+        ) : (
+          <div className="divide-y divide-border">
+            {approved.map((r) => (
+              <div key={r.id} className="flex items-center justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium">{nodeMap[r.node_id] ?? r.node_id.slice(0, 8)}</div>
+                  <div className="font-mono text-[10px] text-muted-foreground">
+                    req · {r.id.slice(0, 8)} · exp {r.expires_at ? new Date(r.expires_at).toLocaleTimeString() : "—"}
+                  </div>
+                </div>
+                <Button size="sm" variant="destructive" onClick={() => decide(r, "revoked")}>
+                  <Ban className="size-4" /> Revoke
+                </Button>
               </div>
             ))}
           </div>

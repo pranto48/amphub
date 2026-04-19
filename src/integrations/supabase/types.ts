@@ -23,8 +23,13 @@ export type Database = {
           node_id: string
           requested_at: string
           requester_id: string
+          revoked_at: string | null
           session_token: string | null
           status: string
+          token_bound_node_id: string
+          token_bound_requester_id: string
+          token_single_use: boolean
+          token_used_at: string | null
         }
         Insert: {
           decided_at?: string | null
@@ -34,8 +39,13 @@ export type Database = {
           node_id: string
           requested_at?: string
           requester_id: string
+          revoked_at?: string | null
           session_token?: string | null
           status?: string
+          token_bound_node_id?: string
+          token_bound_requester_id?: string
+          token_single_use?: boolean
+          token_used_at?: string | null
         }
         Update: {
           decided_at?: string | null
@@ -45,8 +55,13 @@ export type Database = {
           node_id?: string
           requested_at?: string
           requester_id?: string
+          revoked_at?: string | null
           session_token?: string | null
           status?: string
+          token_bound_node_id?: string
+          token_bound_requester_id?: string
+          token_single_use?: boolean
+          token_used_at?: string | null
         }
         Relationships: [
           {
@@ -88,39 +103,54 @@ export type Database = {
       desktop_nodes: {
         Row: {
           created_at: string
+          failed_attempts: number
           id: string
           last_seen: string | null
+          locked_until: string | null
           local_ip: string
           master_password_hash: string | null
           name: string
           os: string
           owner_id: string | null
+          password_algo: string | null
+          password_updated_at: string | null
+          password_version: number
           remote_id: string
           status: string
           updated_at: string
         }
         Insert: {
           created_at?: string
+          failed_attempts?: number
           id?: string
           last_seen?: string | null
+          locked_until?: string | null
           local_ip: string
           master_password_hash?: string | null
           name: string
           os?: string
           owner_id?: string | null
+          password_algo?: string | null
+          password_updated_at?: string | null
+          password_version?: number
           remote_id: string
           status?: string
           updated_at?: string
         }
         Update: {
           created_at?: string
+          failed_attempts?: number
           id?: string
           last_seen?: string | null
+          locked_until?: string | null
           local_ip?: string
           master_password_hash?: string | null
           name?: string
           os?: string
           owner_id?: string | null
+          password_algo?: string | null
+          password_updated_at?: string | null
+          password_version?: number
           remote_id?: string
           status?: string
           updated_at?: string
@@ -177,6 +207,30 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      admin_decide_access_request: {
+        Args: {
+          p_decision: string
+          p_request_id: string
+          p_single_use?: boolean
+          p_ttl_minutes?: number
+        }
+        Returns: {
+          decided_at: string | null
+          decided_by: string | null
+          expires_at: string | null
+          id: string
+          node_id: string
+          requested_at: string
+          requester_id: string
+          revoked_at: string | null
+          session_token: string | null
+          status: string
+          token_bound_node_id: string
+          token_bound_requester_id: string
+          token_single_use: boolean
+          token_used_at: string | null
+        }
+      }
       authorize_privileged_access: {
         Args: {
           p_local?: boolean
@@ -192,6 +246,35 @@ export type Database = {
           matched_request_id: string | null
         }[]
       }
+      audit_access_mode_decision: {
+        Args: {
+          p_detected_same_lan: boolean
+          p_detection_source?: string
+          p_effective_mode: string
+          p_manual_lan_mode: boolean
+          p_node_id: string
+          p_override_differs?: boolean
+          p_requester_hints?: string[]
+        }
+        Returns: string
+      }
+      dashboard_nodes_with_lan: {
+        Args: {
+          p_requester_hints?: string[]
+          p_requester_ip?: string
+        }
+        Returns: {
+          id: string
+          lan_detection_source: string | null
+          last_seen: string | null
+          local_ip: string
+          name: string
+          os: string
+          remote_id: string
+          same_lan: boolean
+          status: string
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -204,6 +287,13 @@ export type Database = {
           ip_text: string
         }
         Returns: boolean
+      }
+      lan_ipv4_subnet: {
+        Args: {
+          ip_text: string
+          mask_bits?: number
+        }
+        Returns: string
       }
       record_privileged_event: {
         Args: {
@@ -219,6 +309,34 @@ export type Database = {
           authorized: boolean
           denial_reason: string | null
           event_id: string
+        }[]
+      }
+      set_node_master_password: {
+        Args: {
+          p_node_id: string
+          p_password: string
+        }
+        Returns: {
+          error_code: string | null
+          password_algo: string | null
+          password_updated_at: string | null
+          password_version: number | null
+          success: boolean
+        }[]
+      }
+      verify_node_master_password: {
+        Args: {
+          p_context?: string
+          p_node_id: string
+          p_password: string
+        }
+        Returns: {
+          error_code: string | null
+          failed_attempts: number | null
+          locked_until: string | null
+          password_updated_at: string | null
+          password_version: number | null
+          verified: boolean
         }[]
       }
     }
