@@ -20,10 +20,17 @@ type Node = {
   updated_at: string;
 };
 
-async function hashPassword(s: string): Promise<string> {
-  const enc = new TextEncoder().encode(s);
-  const buf = await crypto.subtle.digest("SHA-256", enc);
-  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+function passwordStrength(password: string) {
+  let score = 0;
+  if (password.length >= 8) score += 1;
+  if (password.length >= 12) score += 1;
+  if (/[A-Z]/.test(password)) score += 1;
+  if (/[a-z]/.test(password)) score += 1;
+  if (/\d/.test(password)) score += 1;
+  if (/[^A-Za-z0-9]/.test(password)) score += 1;
+  if (score <= 2) return { label: "Weak", className: "text-destructive" };
+  if (score <= 4) return { label: "Moderate", className: "text-warning" };
+  return { label: "Strong", className: "text-primary" };
 }
 
 function SecurityPage() {
@@ -35,14 +42,18 @@ function SecurityPage() {
   const [newPwd, setNewPwd] = React.useState("");
   const [confirmOwnPwd, setConfirmOwnPwd] = React.useState("");
   const [savingOwn, setSavingOwn] = React.useState(false);
+  const [lastOwnUpdateAt, setLastOwnUpdateAt] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (isAdmin) {
       supabase.from("desktop_nodes").select("id,name,remote_id,master_password_hash,updated_at").order("name").then(({ data }) => {
         setNodes((data ?? []) as Node[]);
       });
-    }
   }, [isAdmin]);
+
+  React.useEffect(() => {
+    loadNodes();
+  }, [loadNodes]);
 
   async function setMaster(node: Node) {
     const v = pwd[node.id]?.trim() ?? "";
@@ -53,8 +64,10 @@ function SecurityPage() {
       return;
     }
     setBusy(node.id);
-    const hash = await hashPassword(parsed.data);
-    const { error } = await supabase.from("desktop_nodes").update({ master_password_hash: hash }).eq("id", node.id);
+    const { data, error } = await supabase.rpc("set_node_master_password", {
+      p_node_id: node.id,
+      p_password: parsed.data,
+    });
     setBusy(null);
     if (error) toast.error(error.message);
     else {
@@ -110,7 +123,7 @@ function SecurityPage() {
             <h2 className="text-sm font-semibold">Per-node master passwords</h2>
           </div>
           <p className="mb-4 text-xs text-muted-foreground">
-            Stored as SHA-256 hashes. Used to gate elevated actions on each desktop node.
+            Stored with bcrypt KDF and verified server-side with rate limits + lockouts.
           </p>
           <div className="space-y-3">
             {nodes.map((n) => (
