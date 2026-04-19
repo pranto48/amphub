@@ -136,10 +136,24 @@ function FileExplorer() {
     setTree((t) => rec(t, 0));
   }
 
-  function createFolder() {
+  async function createFolder() {
     const name = newFolder.trim();
     if (!name) return;
     if (current.some((e) => e.name === name)) { toast.error("Name already exists"); return; }
+
+    const { data } = await supabase.rpc("record_privileged_event", {
+      p_node_id: id,
+      p_action: "file_create_folder",
+      p_request_id: search.requestId ?? null,
+      p_local: search.local ?? false,
+      p_metadata: { path, name },
+    });
+    const result = data?.[0];
+    if (!result?.authorized) {
+      toast.error("Create folder denied", { description: result?.denial_reason ?? "request_not_approved" });
+      return;
+    }
+
     mutateAt(path, (entries) => [...entries, { kind: "folder", name, children: [] }]);
     setNewFolder("");
     toast.success(`Folder “${name}” created`);
