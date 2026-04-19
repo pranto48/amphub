@@ -16,6 +16,7 @@ export const Route = createFileRoute("/_authenticated/nodes/$id/files")({
   validateSearch: z.object({
     local: z.coerce.boolean().optional(),
     requestId: z.string().uuid().optional(),
+    sessionToken: z.string().min(8).optional(),
   }),
   component: FileExplorer,
 });
@@ -23,6 +24,10 @@ export const Route = createFileRoute("/_authenticated/nodes/$id/files")({
 type Entry =
   | { kind: "folder"; name: string; children: Entry[] }
   | { kind: "file"; name: string; size: number; type: "text" | "image" | "code" | "archive" | "binary" };
+
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+const ALLOWED_UPLOAD_EXTENSIONS = new Set(["txt", "md", "json", "csv", "png", "jpg", "jpeg", "zip", "pdf", "ts", "tsx"]);
+const BLOCKED_UPLOAD_EXTENSIONS = new Set(["exe", "dll", "bat", "sh", "js", "msi", "scr", "com"]);
 
 function seed(): Entry[] {
   return [
@@ -73,6 +78,16 @@ function getDir(tree: Entry[], path: string[]): Entry[] {
   return cur;
 }
 
+function extOf(name: string) {
+  const segs = name.toLowerCase().split(".");
+  return segs.length > 1 ? segs.pop() ?? "" : "";
+}
+
+async function runMalwareScanPlaceholder(file: File) {
+  await Promise.resolve(file);
+  return { clean: true, reason: null as string | null };
+}
+
 function FileExplorer() {
   const { id } = Route.useParams();
   const search = Route.useSearch();
@@ -85,6 +100,8 @@ function FileExplorer() {
   const [authorized, setAuthorized] = React.useState(false);
   const [authChecked, setAuthChecked] = React.useState(false);
   const [denialReason, setDenialReason] = React.useState<string | null>(null);
+  const [activeOp, setActiveOp] = React.useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   React.useEffect(() => {
     supabase.from("desktop_nodes").select("name").eq("id", id).maybeSingle().then(({ data }) => {
@@ -108,6 +125,8 @@ function FileExplorer() {
       const { data, error } = await supabase.rpc("authorize_privileged_access", {
         p_node_id: id,
         p_request_id: search.requestId ?? null,
+        p_requester_id: user.id,
+        p_session_token: search.sessionToken ?? null,
         p_local: search.local ?? false,
       });
       const result = data?.[0];
@@ -120,110 +139,152 @@ function FileExplorer() {
     }
     checkAccess();
     return () => { cancelled = true; };
-  }, [id, search.local, search.requestId, user]);
+  }, [id, search.local, search.requestId, search.sessionToken, user]);
 
   const current = getDir(tree, path);
+  const canCreateFolder = isAdmin;
+  const canUpload = true;
+  const canDelete = isAdmin;
 
-  function mutateAt(path: string[], updater: (entries: Entry[]) => Entry[]) {
+  function mutateAt(nextPath: string[], updater: (entries: Entry[]) => Entry[]) {
     function rec(entries: Entry[], depth: number): Entry[] {
-      if (depth === path.length) return updater(entries);
+      if (depth === nextPath.length) return updater(entries);
       return entries.map((e) =>
-        e.kind === "folder" && e.name === path[depth]
+        e.kind === "folder" && e.name === nextPath[depth]
           ? { ...e, children: rec(e.children, depth + 1) }
-          : e
+          : e,
       );
     }
     setTree((t) => rec(t, 0));
   }
 
-  function createFolder() {
+  async function recordAction(p_action: string, p_metadata: Record<string, unknown>) {
+    if (!user) {
+      return { authorized: false, denial_reason: "request_not_approved" };
+    }
+    const { data } = await supabase.rpc("record_privileged_event", {
+      p_node_id: id,
+      p_action,
+      p_request_id: search.requestId ?? null,
+      p_requester_id: user.id,
+      p_session_token: search.sessionToken ?? null,
+      p_local: search.local ?? false,
+      p_metadata,
+    });
+    return data?.[0] ?? { authorized: false, denial_reason: "request_not_approved" };
+  }
+
+  async function createFolder() {
     const name = newFolder.trim();
     if (!name) return;
-    if (current.some((e) => e.name === name)) { toast.error("Name already exists"); return; }
+    if (current.some((e) => e.name === name)) {
+      toast.error("Name already exists");
+      return;
+    }
+
+    setActiveOp("create-folder");
+    const result = await recordAction("file_create_folder", { path, name });
+    if (!result.authorized) {
+      toast.error("Create folder denied", { description: result.denial_reason ?? "request_not_approved" });
+      setActiveOp(null);
+      return;
+    }
+
     mutateAt(path, (entries) => [...entries, { kind: "folder", name, children: [] }]);
     setNewFolder("");
+    setActiveOp(null);
     toast.success(`Folder “${name}” created`);
   }
 
-  async function uploadFile() {
-    const { data } = await supabase.rpc("record_privileged_event", {
-      p_node_id: id,
-      p_action: "file_upload",
-      p_request_id: search.requestId ?? null,
-      p_local: search.local ?? false,
-      p_metadata: { path },
-    });
-    const result = data?.[0];
-    if (!result?.authorized) {
-      toast.error("Upload denied", { description: result?.denial_reason ?? "request_not_approved" });
+  async function uploadFile(file: File) {
+    const ext = extOf(file.name);
+    if (file.size > MAX_UPLOAD_BYTES) {
+      toast.error("Upload blocked", { description: `Maximum size is ${fmtSize(MAX_UPLOAD_BYTES)}.` });
+      return;
+    }
+    if (BLOCKED_UPLOAD_EXTENSIONS.has(ext)) {
+      toast.error("Upload blocked", { description: `.${ext} files are blocked by policy.` });
+      return;
+    }
+    if (!ALLOWED_UPLOAD_EXTENSIONS.has(ext)) {
+      toast.error("Upload blocked", { description: `.${ext || "unknown"} is not in the allowed extension list.` });
       return;
     }
 
-    const name = `upload-${Date.now()}.txt`;
-    mutateAt(path, (entries) => [...entries, { kind: "file", name, size: Math.floor(Math.random() * 50000), type: "text" }]);
-    toast.success(`Uploaded ${name}`);
+    setActiveOp("upload");
+    const malwareScan = await runMalwareScanPlaceholder(file);
+    if (!malwareScan.clean) {
+      toast.error("Upload blocked", { description: malwareScan.reason ?? "malware_scan_failed" });
+      setActiveOp(null);
+      return;
+    }
+
+    const result = await recordAction("file_upload", {
+      path,
+      name: file.name,
+      size: file.size,
+      extension: ext,
+      malware_scan: "placeholder_passed",
+    });
+    if (!result.authorized) {
+      toast.error("Upload denied", { description: result.denial_reason ?? "request_not_approved" });
+      setActiveOp(null);
+      return;
+    }
+
+    mutateAt(path, (entries) => [...entries, { kind: "file", name: file.name, size: file.size, type: "text" }]);
+    setActiveOp(null);
+    toast.success(`Uploaded ${file.name}`);
   }
 
   async function deleteEntry(name: string) {
-    const password = window.prompt("Enter node master password to delete this item:");
-    if (!password) {
-      toast.error("Delete canceled", { description: "Master password is required." });
-      return;
-    }
-
-    const verify = await supabase.rpc("verify_node_master_password", {
-      p_node_id: id,
-      p_password: password,
-      p_context: "file_delete",
-    });
-    const verifyResult = verify.data?.[0];
-    if (verify.error || !verifyResult?.verified) {
-      toast.error("Password verification failed", {
-        description: verifyResult?.error_code ?? verify.error?.message ?? "invalid_password",
-      });
-      return;
-    }
-
-    const { data } = await supabase.rpc("record_privileged_event", {
-      p_node_id: id,
-      p_action: "file_delete",
-      p_request_id: search.requestId ?? null,
-      p_local: search.local ?? false,
-      p_metadata: { path, name },
-    });
-    const result = data?.[0];
-    if (!result?.authorized) {
-      toast.error("Delete denied", { description: result?.denial_reason ?? "request_not_approved" });
+    setActiveOp(`delete:${name}`);
+    const result = await recordAction("file_delete", { path, name });
+    if (!result.authorized) {
+      toast.error("Delete denied", { description: result.denial_reason ?? "request_not_approved" });
+      setActiveOp(null);
       return;
     }
 
     mutateAt(path, (entries) => entries.filter((e) => e.name !== name));
+    setActiveOp(null);
     toast.success(`Deleted ${name}`);
   }
 
   async function downloadEntry(name: string) {
-    const { data } = await supabase.rpc("record_privileged_event", {
-      p_node_id: id,
-      p_action: "file_download",
-      p_request_id: search.requestId ?? null,
-      p_local: search.local ?? false,
-      p_metadata: { path, name },
-    });
-    const result = data?.[0];
-    if (!result?.authorized) {
-      toast.error("Download denied", { description: result?.denial_reason ?? "request_not_approved" });
+    setActiveOp(`download:${name}`);
+    const result = await recordAction("file_download", { path, name });
+    if (!result.authorized) {
+      toast.error("Download denied", { description: result.denial_reason ?? "request_not_approved" });
+      setActiveOp(null);
       return;
     }
 
+    setActiveOp(null);
     toast.info(`Downloading ${name}…`, { description: "Streaming via approved session" });
+  }
+
+  function denialMessage(reason: string | null) {
+    if (reason === "expired_token") {
+      return "Session expired. Request fresh access to continue.";
+    }
+    if (reason === "session_token_mismatch") {
+      return "Session token is invalid for this request.";
+    }
+    if (reason === "requester_mismatch") {
+      return "Request context mismatch. Re-open from your own approved request.";
+    }
+    return "Access denied. This explorer requires LAN policy approval or a valid approved request.";
   }
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;
   if (!authChecked) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;
   if (!authorized) {
     return (
-      <Card className="p-8 text-center text-sm text-muted-foreground">
-        Access denied: {denialReason ?? "request_not_approved"}. This file explorer requires LAN access with policy guard or an approved, non-expired remote session.
+      <Card className="space-y-2 p-8 text-center text-sm text-muted-foreground">
+        <div className="font-medium text-foreground">File explorer unavailable</div>
+        <div>{denialMessage(denialReason)}</div>
+        <div className="font-mono text-xs">reason={denialReason ?? "request_not_approved"}</div>
       </Card>
     );
   }
@@ -248,22 +309,48 @@ function FileExplorer() {
           ))}
         </div>
 
-        {isAdmin && (
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <Input
-              placeholder="New folder name"
-              value={newFolder}
-              onChange={(e) => setNewFolder(e.target.value)}
-              className="h-8 max-w-xs"
-            />
-            <Button size="sm" variant="outline" onClick={createFolder}>
-              <FolderPlus className="size-4" /> Create
-            </Button>
-            <Button size="sm" variant="outline" onClick={uploadFile}>
-              <Upload className="size-4" /> Upload
-            </Button>
-          </div>
-        )}
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <Input
+            placeholder="New folder name"
+            value={newFolder}
+            onChange={(e) => setNewFolder(e.target.value)}
+            className="h-8 max-w-xs"
+            disabled={!canCreateFolder || activeOp === "create-folder"}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={createFolder}
+            disabled={!canCreateFolder || activeOp !== null || !newFolder.trim()}
+            title={canCreateFolder ? "Create a folder" : "Only admins can create folders"}
+          >
+            {activeOp === "create-folder" ? <Loader2 className="size-4 animate-spin" /> : <FolderPlus className="size-4" />} Create
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!canUpload || activeOp !== null}
+            title={canUpload ? "Upload a file" : "Your role cannot upload files"}
+          >
+            {activeOp === "upload" ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />} Upload
+          </Button>
+          {!canCreateFolder && (
+            <div className="text-xs text-muted-foreground">Folder create/delete requires admin role.</div>
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) {
+                void uploadFile(file);
+              }
+              e.target.value = "";
+            }}
+          />
+        </div>
       </Card>
 
       <Card className="overflow-hidden p-0">
@@ -277,7 +364,10 @@ function FileExplorer() {
           </button>
         )}
         {current.length === 0 && (
-          <div className="px-4 py-10 text-center text-sm text-muted-foreground">Empty directory</div>
+          <div className="space-y-1 px-4 py-10 text-center text-sm text-muted-foreground">
+            <div>Empty directory</div>
+            <div className="text-xs">No files available for this location yet.</div>
+          </div>
         )}
         {current.map((e) => (
           <div key={e.name} className="flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0 hover:bg-muted/30">
@@ -293,15 +383,27 @@ function FileExplorer() {
             </button>
             <div className="flex items-center gap-1">
               {e.kind === "file" && (
-                <Button size="icon" variant="ghost" className="size-7" onClick={() => downloadEntry(e.name)}>
-                  <Download className="size-3.5" />
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-7"
+                  onClick={() => downloadEntry(e.name)}
+                  disabled={activeOp !== null}
+                  title="Download file"
+                >
+                  {activeOp === `download:${e.name}` ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
                 </Button>
               )}
-              {isAdmin && (
-                <Button size="icon" variant="ghost" className="size-7 text-destructive" onClick={() => deleteEntry(e.name)}>
-                  <Trash2 className="size-3.5" />
-                </Button>
-              )}
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-7 text-destructive"
+                onClick={() => deleteEntry(e.name)}
+                disabled={!canDelete || activeOp !== null}
+                title={canDelete ? "Delete" : "Only admins can delete"}
+              >
+                {activeOp === `delete:${e.name}` ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+              </Button>
             </div>
           </div>
         ))}
