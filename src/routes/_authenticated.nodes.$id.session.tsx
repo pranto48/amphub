@@ -27,8 +27,10 @@ function RemoteSession() {
   const [loading, setLoading] = React.useState(true);
   const [authorized, setAuthorized] = React.useState(false);
   const [authChecked, setAuthChecked] = React.useState(false);
+  const [denialReason, setDenialReason] = React.useState<string | null>(null);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  const sessionStartedRef = React.useRef(false);
 
   React.useEffect(() => {
     supabase.from("desktop_nodes").select("name,remote_id,local_ip,os").eq("id", id).maybeSingle().then(({ data }) => {
@@ -40,30 +42,26 @@ function RemoteSession() {
   React.useEffect(() => {
     let cancelled = false;
     async function checkAccess() {
-      if (search.local) {
-        if (!cancelled) {
-          setAuthorized(true);
-          setAuthChecked(true);
-        }
-        return;
-      }
-      if (!user || !search.requestId) {
+      if (!user) {
         if (!cancelled) {
           setAuthorized(false);
+          setDenialReason("request_not_approved");
           setAuthChecked(true);
         }
         return;
       }
-      const { data } = await supabase
-        .from("access_requests")
-        .select("id,status,expires_at")
-        .eq("id", search.requestId)
-        .eq("node_id", id)
-        .eq("requester_id", user.id)
-        .maybeSingle();
-      const ok = !!data && data.status === "approved" && (!!data.expires_at ? new Date(data.expires_at).getTime() > Date.now() : false);
+
+      const { data, error } = await supabase.rpc("authorize_privileged_access", {
+        p_node_id: id,
+        p_request_id: search.requestId ?? null,
+        p_local: search.local ?? false,
+      });
+
+      const result = data?.[0];
+      const ok = !error && !!result?.authorized;
       if (!cancelled) {
         setAuthorized(ok);
+        setDenialReason(result?.denial_reason ?? (error ? "request_not_approved" : null));
         setAuthChecked(true);
       }
     }
@@ -100,20 +98,65 @@ function RemoteSession() {
     else el.requestFullscreen?.();
   }
 
-  function sendCAD() {
+  async function sendCAD() {
+    const { data } = await supabase.rpc("record_privileged_event", {
+      p_node_id: id,
+      p_action: "session_ctrl_alt_del",
+      p_request_id: search.requestId ?? null,
+      p_local: search.local ?? false,
+      p_metadata: { node_name: name },
+    });
+
+    const result = data?.[0];
+    if (!result?.authorized) {
+      toast.error("Ctrl+Alt+Del denied", { description: result?.denial_reason ?? "request_not_approved" });
+      return;
+    }
+
     toast.info("Ctrl+Alt+Del sent", { description: "Routed through approved session" });
   }
 
-  function disconnect() {
+  async function disconnect() {
+    await supabase.rpc("record_privileged_event", {
+      p_node_id: id,
+      p_action: "session_end",
+      p_request_id: search.requestId ?? null,
+      p_local: search.local ?? false,
+      p_metadata: { node_name: name, source: "disconnect" },
+    });
+
     toast.success("Session ended");
     navigate({ to: "/" });
   }
+
+  React.useEffect(() => {
+    if (!authorized || sessionStartedRef.current) return;
+    sessionStartedRef.current = true;
+
+    void supabase.rpc("record_privileged_event", {
+      p_node_id: id,
+      p_action: "session_start",
+      p_request_id: search.requestId ?? null,
+      p_local: search.local ?? false,
+      p_metadata: { node_name: name },
+    });
+
+    return () => {
+      void supabase.rpc("record_privileged_event", {
+        p_node_id: id,
+        p_action: "session_end",
+        p_request_id: search.requestId ?? null,
+        p_local: search.local ?? false,
+        p_metadata: { node_name: name, source: "unmount" },
+      });
+    };
+  }, [authorized, id, name, search.local, search.requestId]);
 
   if (loading || !authChecked) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;
   if (!authorized) {
     return (
       <Card className="p-8 text-center text-sm text-muted-foreground">
-        Session denied: this route requires LAN mode or an approved, non-expired request token.
+        Session denied: {denialReason ?? "request_not_approved"}. This route requires LAN mode with policy guard or an approved, non-expired request token.
       </Card>
     );
   }
