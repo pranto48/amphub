@@ -107,7 +107,7 @@ function RequestPage() {
               onClick={() => navigate({
                 to: "/nodes/$id/session",
                 params: { id: req.node_id },
-                search: { requestId: req.id },
+                search: { requestId: req.id, sessionToken: req.session_token ?? undefined },
               })}
             >
               Launch session <ArrowRight className="size-4" />

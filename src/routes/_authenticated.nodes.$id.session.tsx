@@ -21,6 +21,7 @@ export const Route = createFileRoute("/_authenticated/nodes/$id/session")({
   validateSearch: z.object({
     local: z.coerce.boolean().optional(),
     requestId: z.string().uuid().optional(),
+    sessionToken: z.string().min(1).optional(),
   }),
   component: RemoteSession,
 });
@@ -136,6 +137,8 @@ function RemoteSession() {
       p_node_id: id,
       p_action: "session_ctrl_alt_del",
       p_request_id: search.requestId ?? null,
+      p_requester_id: user?.id ?? null,
+      p_session_token: search.sessionToken ?? null,
       p_local: search.local ?? false,
       p_metadata: { node_name: name, command: "ctrl_alt_del" },
     });
@@ -157,6 +160,8 @@ function RemoteSession() {
       p_node_id: id,
       p_action: "session_end",
       p_request_id: search.requestId ?? null,
+      p_requester_id: user?.id ?? null,
+      p_session_token: search.sessionToken ?? null,
       p_local: search.local ?? false,
       p_metadata: { node_name: name, source: "disconnect", connection_state: connectionState },
     });
