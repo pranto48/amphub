@@ -5,9 +5,21 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { RouteEmptyState } from "@/components/route-state";
 import {
-  ArrowLeft, Folder, FolderPlus, Upload, Download, Trash2,
-  FileText, FileImage, FileCode, FileArchive, File as FileIcon, ChevronRight,
+  ArrowLeft,
+  Folder,
+  FolderPlus,
+  Upload,
+  Download,
+  Trash2,
+  FileText,
+  FileImage,
+  FileCode,
+  FileArchive,
+  File as FileIcon,
+  ChevronRight,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
@@ -31,24 +43,22 @@ const BLOCKED_UPLOAD_EXTENSIONS = new Set(["exe", "dll", "bat", "sh", "js", "msi
 
 function seed(): Entry[] {
   return [
-    { kind: "folder", name: "Documents", children: [
-      { kind: "file", name: "report-q4.pdf", size: 218000, type: "text" },
-      { kind: "file", name: "budget.xlsx", size: 51200, type: "text" },
-      { kind: "folder", name: "Contracts", children: [
-        { kind: "file", name: "vendor-agreement.docx", size: 31200, type: "text" },
-      ]},
-    ]},
-    { kind: "folder", name: "Downloads", children: [
-      { kind: "file", name: "installer.zip", size: 18400000, type: "archive" },
-      { kind: "file", name: "screenshot.png", size: 412000, type: "image" },
-    ]},
-    { kind: "folder", name: "Projects", children: [
-      { kind: "file", name: "main.ts", size: 4200, type: "code" },
-      { kind: "file", name: "config.json", size: 1100, type: "code" },
-    ]},
-    { kind: "folder", name: "System32", children: [
-      { kind: "file", name: "kernel.dll", size: 2400000, type: "binary" },
-    ]},
+    {
+      kind: "folder",
+      name: "Documents",
+      children: [
+        { kind: "file", name: "report-q4.pdf", size: 218000, type: "text" },
+        { kind: "file", name: "budget.xlsx", size: 51200, type: "text" },
+      ],
+    },
+    {
+      kind: "folder",
+      name: "Downloads",
+      children: [
+        { kind: "file", name: "installer.zip", size: 18400000, type: "archive" },
+        { kind: "file", name: "screenshot.png", size: 412000, type: "image" },
+      ],
+    },
   ];
 }
 
@@ -92,19 +102,26 @@ function FileExplorer() {
   const { id } = Route.useParams();
   const search = Route.useSearch();
   const { user, isAdmin } = useAuth();
-  const [nodeName, setNodeName] = React.useState<string>("");
+  const [nodeName, setNodeName] = React.useState("");
   const [tree, setTree] = React.useState<Entry[]>(() => seed());
   const [path, setPath] = React.useState<string[]>([]);
   const [newFolder, setNewFolder] = React.useState("");
   const [loading, setLoading] = React.useState(true);
   const [authorized, setAuthorized] = React.useState(false);
   const [authChecked, setAuthChecked] = React.useState(false);
+  const [activeOp, setActiveOp] = React.useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   React.useEffect(() => {
-    supabase.from("desktop_nodes").select("name").eq("id", id).maybeSingle().then(({ data }) => {
-      setNodeName(data?.name ?? "");
-      setLoading(false);
-    });
+    supabase
+      .from("desktop_nodes")
+      .select("name")
+      .eq("id", id)
+      .maybeSingle()
+      .then(({ data }) => {
+        setNodeName(data?.name ?? "");
+        setLoading(false);
+      });
   }, [id]);
 
   React.useEffect(() => {
@@ -124,69 +141,42 @@ function FileExplorer() {
         }
         return;
       }
-      const ok = await canAccessApprovedSession({
-        requestId: search.requestId,
-        nodeId: id,
-        userId: user.id,
-      });
+      const ok = await canAccessApprovedSession({ requestId: search.requestId, nodeId: id, userId: user.id });
       if (!cancelled) {
         setAuthorized(ok);
         setAuthChecked(true);
       }
     }
-    checkAccess();
-    return () => { cancelled = true; };
+    void checkAccess();
+    return () => {
+      cancelled = true;
+    };
   }, [id, search.local, search.requestId, user]);
 
   const current = getDir(tree, path);
   const canCreateFolder = isAdmin;
-  const canUpload = true;
+  const canUpload = isAdmin;
   const canDelete = isAdmin;
 
   function mutateAt(nextPath: string[], updater: (entries: Entry[]) => Entry[]) {
     function rec(entries: Entry[], depth: number): Entry[] {
       if (depth === nextPath.length) return updater(entries);
       return entries.map((e) =>
-        e.kind === "folder" && e.name === nextPath[depth]
-          ? { ...e, children: rec(e.children, depth + 1) }
-          : e,
+        e.kind === "folder" && e.name === nextPath[depth] ? { ...e, children: rec(e.children, depth + 1) } : e,
       );
     }
     setTree((t) => rec(t, 0));
   }
 
-  async function createFolder() {
-    const name = newFolder.trim();
-    if (!name) return;
-    if (current.some((e) => e.name === name)) { toast.error("Name already exists"); return; }
-
+  async function recordAction(action: string, metadata: Record<string, unknown>) {
     const { data } = await supabase.rpc("record_privileged_event", {
       p_node_id: id,
-      p_action: "file_create_folder",
+      p_action: action,
       p_request_id: search.requestId ?? null,
+      p_requester_id: user?.id ?? null,
+      p_session_token: null,
       p_local: search.local ?? false,
-      p_metadata: { path, name },
-    });
-    const result = data?.[0];
-    if (!result?.authorized) {
-      toast.error("Create folder denied", { description: result?.denial_reason ?? "request_not_approved" });
-      return;
-    }
-
-    mutateAt(path, (entries) => [...entries, { kind: "folder", name, children: [] }]);
-    setNewFolder("");
-    toast.success(`Folder “${name}” created`);
-  }
-
-  async function uploadFile() {
-    const { data } = await supabase.rpc("record_privileged_event", {
-      p_node_id: id,
-      p_action,
-      p_request_id: search.requestId ?? null,
-      p_requester_id: user.id,
-      p_session_token: search.sessionToken ?? null,
-      p_local: search.local ?? false,
-      p_metadata,
+      p_metadata: metadata,
     });
     return data?.[0] ?? { authorized: false, denial_reason: "request_not_approved" };
   }
@@ -281,8 +271,13 @@ function FileExplorer() {
     toast.info(`Downloading ${name}…`, { description: "Streaming via approved session" });
   }
 
-  if (loading) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;
-  if (!authChecked) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;
+  if (loading || !authChecked)
+    return (
+      <div className="flex justify-center py-20">
+        <Loader2 className="size-5 animate-spin text-primary" />
+      </div>
+    );
+
   if (!authorized) {
     return (
       <Card className="p-8 text-center text-sm text-muted-foreground">
@@ -295,18 +290,24 @@ function FileExplorer() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <Button asChild variant="ghost" size="sm">
-          <Link to="/nodes/$id" params={{ id }}><ArrowLeft className="size-4" /> Node</Link>
+          <Link to="/nodes/$id" params={{ id }}>
+            <ArrowLeft className="size-4" /> Node
+          </Link>
         </Button>
         <div className="font-mono text-xs text-muted-foreground">simulated remote filesystem</div>
       </div>
 
       <Card className="p-4">
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <button type="button" onClick={() => setPath([])} className="font-mono text-primary hover:underline">{nodeName || "node"}:</button>
+          <button type="button" onClick={() => setPath([])} className="font-mono text-primary hover:underline">
+            {nodeName || "node"}:
+          </button>
           {path.map((seg, i) => (
-            <React.Fragment key={i}>
+            <React.Fragment key={seg}>
               <ChevronRight className="size-3 text-muted-foreground" />
-              <button type="button" onClick={() => setPath(path.slice(0, i + 1))} className="font-mono hover:text-primary">{seg}</button>
+              <button type="button" onClick={() => setPath(path.slice(0, i + 1))} className="font-mono hover:text-primary">
+                {seg}
+              </button>
             </React.Fragment>
           ))}
         </div>
@@ -333,22 +334,18 @@ function FileExplorer() {
             variant="outline"
             onClick={() => fileInputRef.current?.click()}
             disabled={!canUpload || activeOp !== null}
-            title={canUpload ? "Upload a file" : "Your role cannot upload files"}
+            title={canUpload ? "Upload a file" : "Only admins can upload"}
           >
             {activeOp === "upload" ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />} Upload
           </Button>
-          {!canCreateFolder && (
-            <div className="text-xs text-muted-foreground">Folder create/delete requires admin role.</div>
-          )}
+          {!canCreateFolder && <div className="text-xs text-muted-foreground">Folder create/upload/delete requires admin role.</div>}
           <input
             ref={fileInputRef}
             type="file"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];
-              if (file) {
-                void uploadFile(file);
-              }
+              if (file) void uploadFile(file);
               e.target.value = "";
             }}
           />
@@ -380,21 +377,13 @@ function FileExplorer() {
             >
               {e.kind === "folder" ? <Folder className="size-4 text-primary" /> : fileIcon(e.type)}
               <span className="font-mono text-sm">{e.name}</span>
-              {e.kind === "file" && (
-                <span className="ml-auto font-mono text-[10px] text-muted-foreground">{fmtSize(e.size)}</span>
-              )}
+              {e.kind === "file" && <span className="ml-auto font-mono text-[10px] text-muted-foreground">{fmtSize(e.size)}</span>}
             </button>
             <div className="flex items-center gap-1">
               {e.kind === "file" && (
-                <Button size="icon" variant="ghost" className="size-7" onClick={() => downloadEntry(e.name)}>
+                <Button size="icon" variant="ghost" className="size-7" onClick={() => downloadEntry(e.name)} disabled={activeOp !== null}>
                   <span className="sr-only">Download {e.name}</span>
-                  <Download className="size-3.5" />
-                </Button>
-              )}
-              {isAdmin && (
-                <Button size="icon" variant="ghost" className="size-7 text-destructive" onClick={() => deleteEntry(e.name)}>
-                  <span className="sr-only">Delete {e.name}</span>
-                  <Trash2 className="size-3.5" />
+                  {activeOp === `download:${e.name}` ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
                 </Button>
               )}
               <Button

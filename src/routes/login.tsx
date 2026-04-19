@@ -23,6 +23,10 @@ function LoginPage() {
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [busy, setBusy] = React.useState(false);
+  const loginFingerprint = React.useMemo(() => {
+    if (typeof window === "undefined") return "server";
+    return `${window.navigator.userAgent}|${window.location.hostname}`;
+  }, []);
 
   React.useEffect(() => {
     if (session) navigate({ to: "/" });
@@ -33,10 +37,30 @@ function LoginPage() {
     const parsed = schema.safeParse({ email, password });
     if (!parsed.success) { toast.error(parsed.error.issues[0].message); return; }
     setBusy(true);
+
+    const throttle = await supabase.rpc("guard_auth_login_attempt", {
+      p_identifier: parsed.data.email,
+      p_client_fingerprint: loginFingerprint,
+    });
+    const throttleResult = throttle.data?.[0];
+    if (!throttleResult?.allowed) {
+      setBusy(false);
+      toast.error("Login temporarily blocked", {
+        description: throttleResult?.locked_until
+          ? `Too many failed attempts. Retry after ${new Date(throttleResult.locked_until).toLocaleTimeString()}.`
+          : throttleResult?.denial_reason ?? "rate_limited",
+      });
+      return;
+    }
+
     const { error } = await signIn(parsed.data.email, parsed.data.password);
     setBusy(false);
     if (error) toast.error(error);
     else {
+      void supabase.rpc("mark_auth_login_success", {
+        p_identifier: parsed.data.email,
+        p_client_fingerprint: loginFingerprint,
+      });
       const { data: userData } = await supabase.auth.getUser();
       void supabase.from("audit_log").insert({
         actor_id: userData.user?.id,

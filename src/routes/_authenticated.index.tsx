@@ -72,6 +72,10 @@ function Dashboard() {
   const [lanMode, setLanMode] = React.useState(true);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [remoteLookup, setRemoteLookup] = React.useState("");
+  const requesterFingerprint = React.useMemo(() => {
+    if (typeof window === "undefined") return "server";
+    return `${window.navigator.userAgent}|${window.location.hostname}`;
+  }, []);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -123,6 +127,21 @@ function Dashboard() {
   async function requestRemote(node: Node) {
     if (!user) return;
     setBusyId(node.id);
+    const throttle = await supabase.rpc("guard_access_request_submission", {
+      p_node_id: node.id,
+      p_requester_id: user.id,
+      p_client_fingerprint: requesterFingerprint,
+    });
+    const throttleResult = throttle.data?.[0];
+    if (!throttleResult?.allowed) {
+      setBusyId(null);
+      toast.error("Request rate limited", {
+        description: throttleResult?.locked_until
+          ? `Too many requests. Retry after ${new Date(throttleResult.locked_until).toLocaleTimeString()}.`
+          : throttleResult?.denial_reason ?? "rate_limited",
+      });
+      return;
+    }
     const { data, error } = await supabase
       .from("access_requests")
       .insert({
@@ -144,12 +163,28 @@ function Dashboard() {
   function quickConnect() {
     const normalized = remoteLookup.trim();
     if (!normalized) return;
-    const matched = nodes.find((n) => n.remote_id === normalized);
-    if (!matched) {
-      toast.error("Remote ID not found", { description: "Check the node's Remote ID and try again." });
-      return;
-    }
-    requestRemote(matched);
+    void (async () => {
+      const throttle = await supabase.rpc("guard_remote_id_probe", {
+        p_remote_id: normalized,
+        p_client_fingerprint: requesterFingerprint,
+      });
+      const throttleResult = throttle.data?.[0];
+      if (!throttleResult?.allowed) {
+        toast.error("Remote ID probe rate limited", {
+          description: throttleResult?.locked_until
+            ? `Retry after ${new Date(throttleResult.locked_until).toLocaleTimeString()}.`
+            : throttleResult?.denial_reason ?? "rate_limited",
+        });
+        return;
+      }
+
+      const matched = nodes.find((n) => n.remote_id === normalized);
+      if (!matched) {
+        toast.error("Remote ID not found", { description: "Check the node's Remote ID and try again." });
+        return;
+      }
+      await requestRemote(matched);
+    })();
   }
 
   return (
