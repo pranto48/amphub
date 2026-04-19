@@ -172,7 +172,7 @@ function RemoteSession() {
       p_action: "session_ctrl_alt_del",
       p_request_id: search.requestId ?? null,
       p_local: search.local ?? false,
-      p_metadata: { node_name: name, channel: "adapter_command" },
+      p_metadata: { node_name: name, command: "ctrl_alt_del" },
     });
 
     const result = data?.[0];
@@ -197,6 +197,21 @@ function RemoteSession() {
     toast.success("Session ended");
     navigate({ to: "/" });
   }
+
+
+  React.useEffect(() => {
+    if (!authorized) return;
+    const timer = window.setInterval(() => {
+      void supabase.rpc("record_privileged_event", {
+        p_node_id: id,
+        p_action: "session_heartbeat",
+        p_request_id: search.requestId ?? null,
+        p_local: search.local ?? false,
+        p_metadata: { node_name: name },
+      });
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [authorized, id, name, search.local, search.requestId]);
 
   React.useEffect(() => {
     if (!authorized || sessionStartedRef.current) return;

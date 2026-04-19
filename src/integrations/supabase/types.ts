@@ -20,9 +20,12 @@ export type Database = {
           decided_by: string | null
           expires_at: string | null
           id: string
+          location_hint: string | null
           node_id: string
+          node_name: string | null
           requested_at: string
           requester_id: string
+          requester_identity: string | null
           revoked_at: string | null
           session_token: string | null
           status: string
@@ -36,9 +39,12 @@ export type Database = {
           decided_by?: string | null
           expires_at?: string | null
           id?: string
+          location_hint?: string | null
           node_id: string
+          node_name?: string | null
           requested_at?: string
           requester_id: string
+          requester_identity?: string | null
           revoked_at?: string | null
           session_token?: string | null
           status?: string
@@ -52,9 +58,12 @@ export type Database = {
           decided_by?: string | null
           expires_at?: string | null
           id?: string
+          location_hint?: string | null
           node_id?: string
+          node_name?: string | null
           requested_at?: string
           requester_id?: string
+          requester_identity?: string | null
           revoked_at?: string | null
           session_token?: string | null
           status?: string
@@ -78,6 +87,7 @@ export type Database = {
           action: string
           actor_id: string | null
           created_at: string
+          event_type: string | null
           id: string
           metadata: Json | null
           target: string | null
@@ -86,6 +96,7 @@ export type Database = {
           action: string
           actor_id?: string | null
           created_at?: string
+          event_type?: string | null
           id?: string
           metadata?: Json | null
           target?: string | null
@@ -94,11 +105,69 @@ export type Database = {
           action?: string
           actor_id?: string | null
           created_at?: string
+          event_type?: string | null
           id?: string
           metadata?: Json | null
           target?: string | null
         }
         Relationships: []
+      }
+      active_sessions: {
+        Row: {
+          ended_at: string | null
+          id: string
+          last_seen_at: string
+          metadata: Json
+          node_id: string
+          request_id: string | null
+          requester_id: string | null
+          started_at: string
+          terminated_at: string | null
+          terminated_by: string | null
+          termination_reason: string | null
+        }
+        Insert: {
+          ended_at?: string | null
+          id?: string
+          last_seen_at?: string
+          metadata?: Json
+          node_id: string
+          request_id?: string | null
+          requester_id?: string | null
+          started_at?: string
+          terminated_at?: string | null
+          terminated_by?: string | null
+          termination_reason?: string | null
+        }
+        Update: {
+          ended_at?: string | null
+          id?: string
+          last_seen_at?: string
+          metadata?: Json
+          node_id?: string
+          request_id?: string | null
+          requester_id?: string | null
+          started_at?: string
+          terminated_at?: string | null
+          terminated_by?: string | null
+          termination_reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "active_sessions_node_id_fkey"
+            columns: ["node_id"]
+            isOneToOne: false
+            referencedRelation: "desktop_nodes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "active_sessions_request_id_fkey"
+            columns: ["request_id"]
+            isOneToOne: false
+            referencedRelation: "access_requests"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       desktop_nodes: {
         Row: {
@@ -219,9 +288,12 @@ export type Database = {
           decided_by: string | null
           expires_at: string | null
           id: string
+          location_hint: string | null
           node_id: string
+          node_name: string | null
           requested_at: string
           requester_id: string
+          requester_identity: string | null
           revoked_at: string | null
           session_token: string | null
           status: string
@@ -229,6 +301,25 @@ export type Database = {
           token_bound_requester_id: string
           token_single_use: boolean
           token_used_at: string | null
+        }
+      }
+      admin_terminate_session: {
+        Args: {
+          p_reason?: string
+          p_session_id: string
+        }
+        Returns: {
+          ended_at: string | null
+          id: string
+          last_seen_at: string
+          metadata: Json
+          node_id: string
+          request_id: string | null
+          requester_id: string | null
+          started_at: string
+          terminated_at: string | null
+          terminated_by: string | null
+          termination_reason: string | null
         }
       }
       authorize_privileged_access: {
@@ -274,6 +365,15 @@ export type Database = {
           same_lan: boolean
           status: string
         }[]
+      }
+      export_incident_review: {
+        Args: {
+          p_event_type?: string
+          p_format?: string
+          p_from?: string
+          p_to?: string
+        }
+        Returns: string
       }
       has_role: {
         Args: {

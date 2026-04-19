@@ -124,7 +124,14 @@ function Dashboard() {
     setBusyId(node.id);
     const { data, error } = await supabase
       .from("access_requests")
-      .insert({ node_id: node.id, requester_id: user.id, status: "pending" })
+      .insert({
+        node_id: node.id,
+        requester_id: user.id,
+        status: "pending",
+        requester_identity: user.user_metadata?.display_name ?? user.email ?? user.id,
+        node_name: node.name,
+        location_hint: Intl.DateTimeFormat().resolvedOptions().timeZone ?? null,
+      })
       .select()
       .single();
     setBusyId(null);
