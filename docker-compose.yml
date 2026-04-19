@@ -24,6 +24,8 @@ services:
       POSTGRES_DB: remoteops
       POSTGRES_USER: remoteops
       POSTGRES_PASSWORD: remoteops_strong_password_change_me
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@remoteops.local}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-Admin@4455!}
     ports:
       - "5433:5432"
     volumes:
