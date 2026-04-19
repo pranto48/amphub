@@ -5,10 +5,7 @@ import { useAuth } from "@/lib/auth-context";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
-import { RouteEmptyState, RouteLoadingState } from "@/components/route-state";
+import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 import {
   Activity,
@@ -285,53 +282,6 @@ function AdminPanel() {
     return () => { supabase.removeChannel(ch); };
   }, [isAdmin, load, nodeMap]);
 
-    return () => {
-      window.clearInterval(cleanup);
-      void supabase.removeChannel(ch);
-    };
-  }, [isAdmin, load, nodeMap, notify]);
-
-  async function decide(req: ReqRow, decision: "approved" | "denied" | "revoked", mode: "once" | "timed" = "timed") {
-    const ttl = mode === "once" ? 1 : 15;
-    const singleUse = mode === "once";
-
-    const { error } = await supabase.rpc("admin_decide_access_request", {
-      p_request_id: req.id,
-      p_decision: decision,
-      p_single_use: singleUse,
-      p_ttl_minutes: ttl,
-    });
-
-    if (error) {
-      notify("error", "Decision failed", error.message);
-      return;
-    }
-
-    notify(
-      decision === "approved" ? "success" : "warning",
-      decision === "approved" ? "Request approved" : decision === "denied" ? "Request denied" : "Request revoked",
-      `${(req.node_name ?? nodeMap[req.node_id] ?? req.node_id.slice(0, 8)).slice(0, 40)} (${mode === "once" ? "approve once" : `${ttl} minute session`}).`,
-    );
-
-    void load();
-  }
-
-  async function terminateSession(session: ActiveSession) {
-    const { error } = await supabase.rpc("admin_terminate_session", {
-      p_session_id: session.id,
-      p_reason: "terminated_from_admin_panel",
-    });
-    setBusyRequest(null);
-
-    if (error) {
-      toast.error("Decision failed", { description: error.message });
-      return;
-    }
-
-    notify("warning", "Session terminated", `Session ${session.id.slice(0, 8)} was terminated by admin.`);
-    void load();
-  }
-
   async function savePolicy() {
     if (!user) return;
     setPolicySaving(true);
@@ -417,11 +367,24 @@ function AdminPanel() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Admin Panel</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-animated-accent">Admin Panel</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Review approval queue, enforce access policy settings, and control live sessions.
         </p>
       </div>
+      <Card className="p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild size="sm" variant="secondary">
+            <Link to="/security">Security Settings</Link>
+          </Button>
+          <Button asChild size="sm" variant="outline">
+            <Link to="/settings">User Settings</Link>
+          </Button>
+          <Badge variant="outline" className="font-mono text-[10px] uppercase tracking-wider">
+            admin actions
+          </Badge>
+        </div>
+      </Card>
 
       <Card className="p-4">
         <div className="mb-3 flex items-center gap-2">

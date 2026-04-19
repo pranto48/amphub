@@ -9,7 +9,7 @@ import { OsIcon } from "@/components/OsIcon";
 import { useAuth } from "@/lib/auth-context";
 import { RouteEmptyState, RouteLoadingState } from "@/components/route-state";
 import {
-  Wifi, Globe, Loader2, ShieldAlert, RefreshCw, Server, Search, ArrowRightLeft,
+  Wifi, Globe, Loader2, ShieldAlert, RefreshCw, Server, Search, ArrowRightLeft, FileStack, MonitorCog,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -190,7 +190,7 @@ function Dashboard() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Desktop Nodes</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-animated-accent">Desktop Nodes</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Registered remote desktops | {nodes.length} total |{" "}
             {nodes.filter((n) => n.status === "online").length} online
@@ -210,6 +210,19 @@ function Dashboard() {
           </Button>
         </div>
       </div>
+      <Card className="p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="secondary">
+            <MonitorCog className="size-4" /> Session Monitor
+          </Button>
+          <Button size="sm" variant="outline">
+            <FileStack className="size-4" /> File Center
+          </Button>
+          <Button size="sm" variant="outline" onClick={load}>
+            <RefreshCw className="size-4" /> Sync Nodes
+          </Button>
+        </div>
+      </Card>
       <Card className="p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
