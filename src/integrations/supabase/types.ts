@@ -182,6 +182,8 @@ export type Database = {
           p_local?: boolean
           p_node_id: string
           p_request_id?: string
+          p_requester_id?: string
+          p_session_token?: string
         }
         Returns: {
           access_mode: string
@@ -210,6 +212,8 @@ export type Database = {
           p_metadata?: Json
           p_node_id: string
           p_request_id?: string
+          p_requester_id?: string
+          p_session_token?: string
         }
         Returns: {
           authorized: boolean
