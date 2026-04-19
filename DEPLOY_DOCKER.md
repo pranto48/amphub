@@ -13,6 +13,13 @@ This project now includes a Docker setup that exposes the app on port **4455** a
 docker compose up --build -d
 ```
 
+If you previously built with an older Dockerfile, rebuild without cache:
+
+```bash
+docker compose build --no-cache app
+docker compose up -d
+```
+
 Then open:
 - App: `http://localhost:4455`
 
