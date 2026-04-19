@@ -4,9 +4,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
-  Loader2, Hourglass, CheckCircle2, XCircle, ArrowRight, Ban, TimerOff,
+  Hourglass, CheckCircle2, XCircle, ArrowRight, Ban, TimerOff,
 } from "lucide-react";
 import { toast } from "sonner";
+import { RouteLoadingState } from "@/components/route-state";
 
 export const Route = createFileRoute("/_authenticated/requests/$id")({ component: RequestPage });
 
@@ -60,7 +61,7 @@ function RequestPage() {
     };
   }, [id, load]);
 
-  if (loading) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;
+  if (loading) return <RouteLoadingState label="Loading access request" withSkeleton />;
   if (!req) return <Card className="p-8">Request not found.</Card>;
 
   const expiredByTtl = req.status === "approved" && req.expires_at && new Date(req.expires_at).getTime() <= Date.now();

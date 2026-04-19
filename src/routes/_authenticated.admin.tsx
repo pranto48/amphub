@@ -4,11 +4,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { RouteEmptyState, RouteLoadingState } from "@/components/route-state";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import {
-  Loader2, Check, X, ShieldAlert, Activity, ScrollText, Ban, BellRing, Download, AlertTriangle, CircleCheckBig,
-  CircleOff, Radio,
+  Check, X, ShieldAlert, Activity, ScrollText, Ban,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/admin")({ component: AdminPanel });
@@ -262,13 +262,13 @@ function AdminPanel() {
           <Badge variant="outline" className="font-mono">{pending.length}</Badge>
         </div>
         {loading ? (
-          <div className="flex justify-center py-8"><Loader2 className="size-4 animate-spin" /></div>
+          <RouteLoadingState label="Loading pending access requests" />
         ) : pending.length === 0 ? (
-          <div className="py-8 text-center text-sm text-muted-foreground">No pending requests.</div>
+          <RouteEmptyState title="No pending requests." description="New approvals will appear here in real time." />
         ) : (
           <div className="divide-y divide-border">
             {pending.map((r) => (
-              <div key={r.id} className="flex items-center justify-between gap-3 py-3">
+              <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
                 <div className="min-w-0">
                   <div className="text-sm font-medium">{r.node_name ?? nodeMap[r.node_id] ?? r.node_id.slice(0, 8)}</div>
                   <div className="text-xs text-muted-foreground">Requester: {r.requester_identity ?? r.requester_id.slice(0, 8)} · {r.location_hint ?? "location unavailable"}</div>
@@ -276,7 +276,7 @@ function AdminPanel() {
                     req · {r.id.slice(0, 8)} · {new Date(r.requested_at).toLocaleTimeString()}
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <Button size="sm" variant="outline" onClick={() => decide(r, "denied")}>
                     <X className="size-4" /> Deny
                   </Button>
@@ -297,11 +297,11 @@ function AdminPanel() {
           <Badge variant="outline" className="font-mono">{approved.length}</Badge>
         </div>
         {approved.length === 0 ? (
-          <div className="py-8 text-center text-sm text-muted-foreground">No active approvals.</div>
+          <RouteEmptyState title="No active approvals." description="Approved sessions with valid TTL will show here." />
         ) : (
           <div className="divide-y divide-border">
             {approved.map((r) => (
-              <div key={r.id} className="flex items-center justify-between gap-3 py-3">
+              <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
                 <div className="min-w-0">
                   <div className="text-sm font-medium">{r.node_name ?? nodeMap[r.node_id] ?? r.node_id.slice(0, 8)}</div>
                   <div className="text-xs text-muted-foreground">Requester: {r.requester_identity ?? r.requester_id.slice(0, 8)}</div>
@@ -369,7 +369,7 @@ function AdminPanel() {
           </div>
         </div>
         {audit.length === 0 ? (
-          <div className="py-8 text-center text-sm text-muted-foreground">No activity yet.</div>
+          <RouteEmptyState title="No activity yet." description="Audit events will populate as actions occur." />
         ) : (
           <div className="divide-y divide-border">
             {audit.map((a) => (
