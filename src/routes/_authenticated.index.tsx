@@ -87,10 +87,6 @@ function Dashboard() {
   const [lanMode, setLanMode] = React.useState(true);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [remoteLookup, setRemoteLookup] = React.useState("");
-  const requesterFingerprint = React.useMemo(() => {
-    if (typeof window === "undefined") return "server";
-    return `${window.navigator.userAgent}|${window.location.hostname}`;
-  }, []);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -175,35 +171,19 @@ function Dashboard() {
       .single();
     setBusyId(null);
     if (error) { toast.error(error.message); return; }
-    toast.info("Access request sent", { description: `Request created for ${node.name}. Awaiting admin approval…` });
+    toast.info("Access request sent", { description: `Request created for ${node.name}. Awaiting admin approval...` });
     navigate({ to: "/requests/$id", params: { id: data.id } });
   }
 
   function quickConnect() {
     const normalized = remoteLookup.trim();
     if (!normalized) return;
-    void (async () => {
-      const throttle = await supabase.rpc("guard_remote_id_probe", {
-        p_remote_id: normalized,
-        p_client_fingerprint: requesterFingerprint,
-      });
-      const throttleResult = throttle.data?.[0];
-      if (!throttleResult?.allowed) {
-        toast.error("Remote ID probe rate limited", {
-          description: throttleResult?.locked_until
-            ? `Retry after ${new Date(throttleResult.locked_until).toLocaleTimeString()}.`
-            : throttleResult?.denial_reason ?? "rate_limited",
-        });
-        return;
-      }
-
-      const matched = nodes.find((n) => n.remote_id === normalized);
-      if (!matched) {
-        toast.error("Remote ID not found", { description: "Check the node's Remote ID and try again." });
-        return;
-      }
-      await requestRemote(matched);
-    })();
+    const matched = nodes.find((n) => n.remote_id === normalized);
+    if (!matched) {
+      toast.error("Remote ID not found", { description: "Check the node's Remote ID and try again." });
+      return;
+    }
+    requestRemote(matched);
   }
 
   return (
@@ -212,7 +192,7 @@ function Dashboard() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Desktop Nodes</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Registered remote desktops · {nodes.length} total ·{" "}
+            Registered remote desktops | {nodes.length} total |{" "}
             {nodes.filter((n) => n.status === "online").length} online
           </p>
         </div>
@@ -242,32 +222,13 @@ function Dashboard() {
             <input
               className="h-9 w-full rounded-md border border-input bg-background px-3 font-mono text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
               value={remoteLookup}
-              onChange={(e) => setRemoteLookup(canonicalizeRemoteIdInput(e.target.value))}
+              onChange={(e) => setRemoteLookup(e.target.value)}
               placeholder="e.g. 847-291-563"
             />
             <Button size="sm" variant="secondary" onClick={quickConnect}>
               <Search className="size-4" /> Request Access
             </Button>
           </div>
-        </div>
-        <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]">
-          <input
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-            value={requestReason}
-            onChange={(e) => setRequestReason(e.target.value)}
-            placeholder="Reason for access (shown to admins)"
-          />
-          <label className="flex items-center gap-2 text-xs text-muted-foreground">
-            Pending timeout (min)
-            <input
-              className="h-9 w-20 rounded-md border border-input bg-background px-2 font-mono text-sm"
-              min={1}
-              max={120}
-              type="number"
-              value={pendingTimeoutMinutes}
-              onChange={(e) => setPendingTimeoutMinutes(Math.max(1, Math.min(120, Number(e.target.value) || 10)))}
-            />
-          </label>
         </div>
       </Card>
 

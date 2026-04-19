@@ -102,15 +102,13 @@ function FileExplorer() {
   const { id } = Route.useParams();
   const search = Route.useSearch();
   const { user, isAdmin } = useAuth();
-  const [nodeName, setNodeName] = React.useState("");
+  const [nodeName, setNodeName] = React.useState<string>("");
   const [tree, setTree] = React.useState<Entry[]>(() => seed());
   const [path, setPath] = React.useState<string[]>([]);
   const [newFolder, setNewFolder] = React.useState("");
   const [loading, setLoading] = React.useState(true);
   const [authorized, setAuthorized] = React.useState(false);
   const [authChecked, setAuthChecked] = React.useState(false);
-  const [activeOp, setActiveOp] = React.useState<string | null>(null);
-  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   React.useEffect(() => {
     supabase
@@ -141,16 +139,18 @@ function FileExplorer() {
         }
         return;
       }
-      const ok = await canAccessApprovedSession({ requestId: search.requestId, nodeId: id, userId: user.id });
+      const ok = await canAccessApprovedSession({
+        requestId: search.requestId,
+        nodeId: id,
+        userId: user.id,
+      });
       if (!cancelled) {
         setAuthorized(ok);
         setAuthChecked(true);
       }
     }
-    void checkAccess();
-    return () => {
-      cancelled = true;
-    };
+    checkAccess();
+    return () => { cancelled = true; };
   }, [id, search.local, search.requestId, user]);
 
   const current = getDir(tree, path);
@@ -271,13 +271,8 @@ function FileExplorer() {
     toast.info(`Downloading ${name}…`, { description: "Streaming via approved session" });
   }
 
-  if (loading || !authChecked)
-    return (
-      <div className="flex justify-center py-20">
-        <Loader2 className="size-5 animate-spin text-primary" />
-      </div>
-    );
-
+  if (loading) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;
+  if (!authChecked) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;
   if (!authorized) {
     return (
       <Card className="p-8 text-center text-sm text-muted-foreground">

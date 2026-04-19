@@ -17,8 +17,14 @@ type Node = {
   name: string;
   remote_id: string;
   master_password_hash: string | null;
-  password_updated_at: string | null;
+  updated_at: string;
 };
+
+async function hashPassword(s: string): Promise<string> {
+  const enc = new TextEncoder().encode(s);
+  const buf = await crypto.subtle.digest("SHA-256", enc);
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 function SecurityPage() {
   const { isAdmin } = useAuth();
@@ -30,13 +36,12 @@ function SecurityPage() {
   const [confirmOwnPwd, setConfirmOwnPwd] = React.useState("");
   const [savingOwn, setSavingOwn] = React.useState(false);
 
-  const loadNodes = React.useCallback(async () => {
-    if (!isAdmin) return;
-    const { data } = await supabase
-      .from("desktop_nodes")
-      .select("id,name,remote_id,master_password_hash,password_updated_at")
-      .order("name");
-    setNodes((data ?? []) as Node[]);
+  React.useEffect(() => {
+    if (isAdmin) {
+      supabase.from("desktop_nodes").select("id,name,remote_id,master_password_hash,updated_at").order("name").then(({ data }) => {
+        setNodes((data ?? []) as Node[]);
+      });
+    }
   }, [isAdmin]);
 
   React.useEffect(() => {
@@ -46,70 +51,36 @@ function SecurityPage() {
   async function setMaster(node: Node) {
     const v = pwd[node.id]?.trim() ?? "";
     const parsed = z.string().min(8).max(128).safeParse(v);
-    if (!parsed.success) {
-      toast.error("Master password must be 8–128 chars");
-      return;
-    }
+    if (!parsed.success) { toast.error("Master password must be 8-128 chars"); return; }
     if (parsed.data !== (confirmPwd[node.id]?.trim() ?? "")) {
       toast.error("Master password confirmation does not match");
       return;
     }
-
     setBusy(node.id);
     const { data, error } = await supabase.rpc("set_node_master_password", {
       p_node_id: node.id,
       p_password: parsed.data,
     });
     setBusy(null);
-
-    if (error) {
-      toast.error(error.message);
-      return;
+    if (error) toast.error(error.message);
+    else {
+      toast.success(`Master password updated for ${node.name}`);
+      setPwd((p) => ({ ...p, [node.id]: "" }));
+      setConfirmPwd((p) => ({ ...p, [node.id]: "" }));
+      setNodes((prev) => prev.map((n) => (n.id === node.id ? { ...n, master_password_hash: hash, updated_at: new Date().toISOString() } : n)));
     }
-
-    const result = data?.[0];
-    if (!result?.success) {
-      toast.error("Password update failed", { description: result?.error_code ?? "unknown_error" });
-      return;
-    }
-
-    toast.success(`Master password updated for ${node.name}`);
-    setPwd((p) => ({ ...p, [node.id]: "" }));
-    setConfirmPwd((p) => ({ ...p, [node.id]: "" }));
-    setNodes((prev) =>
-      prev.map((n) =>
-        n.id === node.id
-          ? {
-              ...n,
-              master_password_hash: "configured",
-              password_updated_at: result.password_updated_at ?? new Date().toISOString(),
-            }
-          : n,
-      ),
-    );
   }
 
   async function changeOwn() {
     const parsed = z.string().min(8).max(128).safeParse(newPwd);
-    if (!parsed.success) {
-      toast.error("Password must be 8–128 chars");
-      return;
-    }
-    if (parsed.data !== confirmOwnPwd) {
-      toast.error("Password confirmation does not match");
-      return;
-    }
-
+    if (!parsed.success) { toast.error("Password must be 8-128 chars"); return; }
+    if (parsed.data !== confirmOwnPwd) { toast.error("Password confirmation does not match"); return; }
     setSavingOwn(true);
     const { error } = await supabase.auth.updateUser({ password: parsed.data });
     setSavingOwn(false);
 
     if (error) toast.error(error.message);
-    else {
-      toast.success("Password updated");
-      setNewPwd("");
-      setConfirmOwnPwd("");
-    }
+    else { toast.success("Password updated"); setNewPwd(""); setConfirmOwnPwd(""); }
   }
 
   return (
@@ -151,17 +122,19 @@ function SecurityPage() {
           <div className="space-y-3">
             {nodes.map((n) => (
               <div key={n.id} className="space-y-3 rounded-md border border-border p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <div className="text-sm font-medium">{n.name}</div>
-                    <div className="font-mono text-[10px] text-muted-foreground">{n.remote_id}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                      {n.master_password_hash ? "Configured" : "Not set"}
+                <div className="flex-1">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="text-sm font-medium">{n.name}</div>
+                      <div className="font-mono text-[10px] text-muted-foreground">{n.remote_id}</div>
                     </div>
-                    <div className="text-[10px] text-muted-foreground">
-                      Updated {n.password_updated_at ? new Date(n.password_updated_at).toLocaleString() : "never"}
+                    <div className="text-right">
+                      <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {n.master_password_hash ? "Configured" : "Not set"}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">
+                        Updated {new Date(n.updated_at).toLocaleString()}
+                      </div>
                     </div>
                   </div>
                 </div>

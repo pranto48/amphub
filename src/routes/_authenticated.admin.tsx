@@ -278,20 +278,12 @@ function AdminPanel() {
       .channel("admin-requests")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "access_requests" }, (payload) => {
         const r = payload.new as ReqRow;
-        const nodeName = nodeMap[r.node_id] ?? `Node ${r.node_id.slice(0, 8)}`;
-        notify("warning", "New access request", `${nodeName} is awaiting approval.`);
-        setPending((prev) => [r, ...prev]);
-      })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "access_requests" }, () => {
-        void load();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "active_sessions" }, () => {
-        void load();
-      })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "audit_log" }, () => {
-        void load();
+        toast.warning("New access request", { description: `${nodeMap[r.node_id] ?? `Node ${r.node_id.slice(0, 8)}`} awaiting approval` });
+        setPending((p) => [r, ...p]);
       })
       .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [isAdmin, load, nodeMap]);
 
     return () => {
       window.clearInterval(cleanup);
