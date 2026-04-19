@@ -1,5 +1,6 @@
 import * as React from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { z } from "zod";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,13 @@ import {
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
 
-export const Route = createFileRoute("/_authenticated/nodes/$id/files")({ component: FileExplorer });
+export const Route = createFileRoute("/_authenticated/nodes/$id/files")({
+  validateSearch: z.object({
+    local: z.coerce.boolean().optional(),
+    requestId: z.string().uuid().optional(),
+  }),
+  component: FileExplorer,
+});
 
 type Entry =
   | { kind: "folder"; name: string; children: Entry[] }
@@ -68,12 +75,15 @@ function getDir(tree: Entry[], path: string[]): Entry[] {
 
 function FileExplorer() {
   const { id } = Route.useParams();
-  const { isAdmin } = useAuth();
+  const search = Route.useSearch();
+  const { user, isAdmin } = useAuth();
   const [nodeName, setNodeName] = React.useState<string>("");
   const [tree, setTree] = React.useState<Entry[]>(() => seed());
   const [path, setPath] = React.useState<string[]>([]);
   const [newFolder, setNewFolder] = React.useState("");
   const [loading, setLoading] = React.useState(true);
+  const [authorized, setAuthorized] = React.useState(false);
+  const [authChecked, setAuthChecked] = React.useState(false);
 
   React.useEffect(() => {
     supabase.from("desktop_nodes").select("name").eq("id", id).maybeSingle().then(({ data }) => {
@@ -81,6 +91,40 @@ function FileExplorer() {
       setLoading(false);
     });
   }, [id]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    async function checkAccess() {
+      if (search.local) {
+        if (!cancelled) {
+          setAuthorized(true);
+          setAuthChecked(true);
+        }
+        return;
+      }
+      if (!user || !search.requestId) {
+        if (!cancelled) {
+          setAuthorized(false);
+          setAuthChecked(true);
+        }
+        return;
+      }
+      const { data } = await supabase
+        .from("access_requests")
+        .select("id,status,expires_at")
+        .eq("id", search.requestId)
+        .eq("node_id", id)
+        .eq("requester_id", user.id)
+        .maybeSingle();
+      const ok = !!data && data.status === "approved" && (!!data.expires_at ? new Date(data.expires_at).getTime() > Date.now() : false);
+      if (!cancelled) {
+        setAuthorized(ok);
+        setAuthChecked(true);
+      }
+    }
+    checkAccess();
+    return () => { cancelled = true; };
+  }, [id, search.local, search.requestId, user]);
 
   const current = getDir(tree, path);
 
@@ -121,6 +165,14 @@ function FileExplorer() {
   }
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;
+  if (!authChecked) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;
+  if (!authorized) {
+    return (
+      <Card className="p-8 text-center text-sm text-muted-foreground">
+        This file explorer requires LAN access or an approved, non-expired remote session.
+      </Card>
+    );
+  }
 
   return (
     <div className="space-y-4">

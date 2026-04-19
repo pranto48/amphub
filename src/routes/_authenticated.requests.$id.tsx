@@ -78,7 +78,14 @@ function RequestPage() {
             <p className="mt-1 text-sm text-muted-foreground">
               Session token issued. You may launch the remote session now.
             </p>
-            <Button className="mt-5" onClick={() => navigate({ to: "/nodes/$id/session", params: { id: req.node_id } })}>
+            <Button
+              className="mt-5"
+              onClick={() => navigate({
+                to: "/nodes/$id/session",
+                params: { id: req.node_id },
+                search: { requestId: req.id },
+              })}
+            >
               Launch session <ArrowRight className="size-4" />
             </Button>
           </>

@@ -48,12 +48,12 @@ function NodeDetail() {
 
         <div className="mt-6 grid grid-cols-2 gap-3">
           <Button asChild variant="outline">
-            <Link to="/nodes/$id/files" params={{ id: node.id }}>
+            <Link to="/nodes/$id/files" params={{ id: node.id }} search={{ local: true }}>
               <FolderOpen className="size-4" /> File Explorer
             </Link>
           </Button>
           <Button asChild>
-            <Link to="/nodes/$id/session" params={{ id: node.id }}>
+            <Link to="/nodes/$id/session" params={{ id: node.id }} search={{ local: true }}>
               <MonitorIcon className="size-4" /> Open Remote Session
             </Link>
           </Button>
