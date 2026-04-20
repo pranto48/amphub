@@ -1,7 +1,6 @@
 import * as React from "react";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { dataClient } from "@/lib/data";
-import type { DesktopNode } from "@/lib/data/types";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +14,71 @@ import {
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/")({ component: Dashboard });
+
+type Node = {
+  id: string;
+  name: string;
+  remote_id: string;
+  local_ip: string;
+  os: string;
+  status: string;
+  last_seen: string | null;
+  same_lan: boolean;
+  lan_detection_source: string | null;
+};
+
+const REMOTE_ID_DIGITS = 9;
+const DEFAULT_PENDING_TIMEOUT_MINUTES = 15;
+
+function canonicalizeRemoteIdInput(value: string): string {
+  const digits = value.replace(/\D/g, "").slice(0, REMOTE_ID_DIGITS);
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+  return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
+function normalizeRemoteIdForLookup(value: string): string | null {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length !== REMOTE_ID_DIGITS) return null;
+  return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
+function parsePrivateIPv4(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const ipv4Pattern = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+  const match = value.match(ipv4Pattern);
+  if (!match) return null;
+  const parts = match.slice(1).map(Number);
+  if (parts.some((part) => part < 0 || part > 255)) return null;
+
+  if (parts[0] === 10) return value;
+  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return value;
+  if (parts[0] === 192 && parts[1] === 168) return value;
+  if (parts[0] === 169 && parts[1] === 254) return value;
+  return null;
+}
+
+function getRequesterNetworkHints() {
+  if (typeof window === "undefined") return { requesterIp: null as string | null, hints: [] as string[] };
+
+  const hostnameHint = parsePrivateIPv4(window.location.hostname);
+  const persistedHints = window.localStorage.getItem("amphub.requester_network_hints");
+  const splitHints = (persistedHints ?? "")
+    .split(",")
+    .map((hint) => hint.trim())
+    .filter(Boolean);
+
+  const normalizedHints = Array.from(new Set(
+    [hostnameHint, ...splitHints]
+      .map((hint) => parsePrivateIPv4(hint))
+      .filter((hint): hint is string => Boolean(hint)),
+  ));
+
+  return {
+    requesterIp: hostnameHint,
+    hints: normalizedHints,
+  };
+}
 
 function Dashboard() {
   const { user } = useAuth();
@@ -51,7 +115,8 @@ function Dashboard() {
     return () => unsub();
   }, [load]);
 
-  async function localAccess(node: DesktopNode) {
+  async function localAccess(node: Node) {
+    void auditModeDecision(node, true);
     toast.success(`Local connection initiated to ${node.local_ip}`, {
       description: `Routing through LAN to ${node.name}`,
     });
@@ -108,13 +173,20 @@ function Dashboard() {
       <Card className="p-3">
         <div className="flex flex-wrap items-center gap-2">
           <Button asChild size="sm" variant="secondary" aria-label="Go to session monitor">
-            <Link to="/admin"><MonitorCog className="size-4" /> Session Monitor</Link>
+            <Link to="/admin">
+              <MonitorCog className="size-4" />
+              <span>Session Monitor</span>
+            </Link>
           </Button>
           <Button asChild size="sm" variant="outline" aria-label="Open security page">
-            <Link to="/security"><FileStack className="size-4" /> File Center</Link>
+            <Link to="/security">
+              <FileStack className="size-4" />
+              <span>File Center</span>
+            </Link>
           </Button>
           <Button size="sm" variant="outline" onClick={load} aria-label="Sync node list">
-            <RefreshCw className="size-4" /> Sync Nodes
+            <RefreshCw className="size-4" />
+            <span>Sync Nodes</span>
           </Button>
         </div>
       </Card>
@@ -200,7 +272,7 @@ function Dashboard() {
                     className="flex-1"
                     disabled={n.status !== "online" || !lanMode}
                     onClick={() => localAccess(n)}
-                    aria-label={`Start local access for ${n.name}` }
+                    aria-label={`Start local access for ${n.name}`}
                   >
                     <Wifi className="size-4" /> Local Access
                   </Button>
@@ -210,7 +282,7 @@ function Dashboard() {
                     className="flex-1"
                     disabled={busyId === n.id || n.status !== "online"}
                     onClick={() => requestRemote(n)}
-                    aria-label={`Request remote access for ${n.name}` }
+                    aria-label={`Request remote access for ${n.name}`}
                   >
                     {busyId === n.id ? <Loader2 className="size-4 animate-spin" /> : <ArrowRightLeft className="size-4" />}
                     Remote Access
