@@ -51,8 +51,39 @@ Then open:
 
 ## Notes
 
-- The gateway routes are defined in `docker/kong/kong.yml` for:
-  - `/auth/v1/*`
-  - `/rest/v1/*`
-  - `/realtime/v1/*`
-- Existing app code in `src/integrations/supabase/client.ts` and route files continues to work unchanged, now against local services.
+If you run a local/self-hosted Supabase gateway, set these to that endpoint/key.
+
+## Troubleshooting: `supabase/gotrue:latest` manifest unknown
+
+If you are running an older/full Supabase self-host docker compose stack and see:
+
+```
+manifest for supabase/gotrue:latest not found
+```
+
+it means that `latest` is not a valid tag for `supabase/gotrue`.
+
+### Fix options
+
+1. **Quick one-line patch in your compose file**
+
+```bash
+sed -i 's|supabase/gotrue:latest|supabase/gotrue:v2.186.0|g' docker-compose.yml
+```
+
+2. **Use the pinned override file in this repo** (for stacks that have `auth`, `rest`, `realtime`, `kong` services):
+
+```bash
+docker compose --profile prod \
+  -f docker-compose.yml \
+  -f docker-compose.supabase-pins.yml \
+  up --build -d
+```
+
+3. **Pull tag explicitly to verify**
+
+```bash
+docker pull supabase/gotrue:v2.186.0
+```
+
+> Note: the default `docker-compose.yml` in this repo runs only `app` + `db` and does not require `supabase/gotrue` directly.
