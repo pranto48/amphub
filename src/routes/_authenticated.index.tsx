@@ -1,5 +1,5 @@
 import * as React from "react";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,7 @@ type Node = {
 };
 
 const REMOTE_ID_DIGITS = 9;
+const DEFAULT_PENDING_TIMEOUT_MINUTES = 15;
 
 function canonicalizeRemoteIdInput(value: string): string {
   const digits = value.replace(/\D/g, "").slice(0, REMOTE_ID_DIGITS);
@@ -87,6 +88,13 @@ function Dashboard() {
   const [lanMode, setLanMode] = React.useState(true);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [remoteLookup, setRemoteLookup] = React.useState("");
+  const [pendingTimeoutMinutes] = React.useState(DEFAULT_PENDING_TIMEOUT_MINUTES);
+  const [requestReason, setRequestReason] = React.useState("");
+
+  const requesterFingerprint = React.useMemo(() => {
+    if (typeof window === "undefined") return "server";
+    return [window.navigator.userAgent, Intl.DateTimeFormat().resolvedOptions().timeZone, window.location.hostname].join("|");
+  }, []);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -129,6 +137,7 @@ function Dashboard() {
   }
 
   async function localAccess(node: Node) {
+    void auditModeDecision(node, true);
     toast.success(`Local connection initiated to ${node.local_ip}`, {
       description: `Routing through LAN to ${node.name}`,
     });
@@ -137,6 +146,7 @@ function Dashboard() {
 
   async function requestRemote(node: Node) {
     if (!user) return;
+    void auditModeDecision(node, false);
     setBusyId(node.id);
     const throttle = await supabase.rpc("guard_access_request_submission", {
       p_node_id: node.id,
@@ -176,7 +186,7 @@ function Dashboard() {
   }
 
   function quickConnect() {
-    const normalized = remoteLookup.trim();
+    const normalized = normalizeRemoteIdForLookup(remoteLookup.trim());
     if (!normalized) return;
     const matched = nodes.find((n) => n.remote_id === normalized);
     if (!matched) {
@@ -201,24 +211,25 @@ function Dashboard() {
             variant={lanMode ? "default" : "outline"}
             size="sm"
             onClick={() => setLanMode((v) => !v)}
+            aria-label="Toggle LAN or remote mode"
           >
             {lanMode ? <Wifi className="size-4" /> : <Globe className="size-4" />}
             {lanMode ? "LAN mode" : "Remote mode"}
           </Button>
-          <Button variant="outline" size="sm" onClick={load}>
+          <Button variant="outline" size="sm" onClick={load} aria-label="Refresh nodes">
             <RefreshCw className="size-4" /> Refresh
           </Button>
         </div>
       </div>
       <Card className="p-3">
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="secondary">
-            <MonitorCog className="size-4" /> Session Monitor
+          <Button asChild size="sm" variant="secondary" aria-label="Go to session monitor">
+            <Link to="/admin"><MonitorCog className="size-4" /> Session Monitor</Link>
           </Button>
-          <Button size="sm" variant="outline">
-            <FileStack className="size-4" /> File Center
+          <Button asChild size="sm" variant="outline" aria-label="Open security page">
+            <Link to="/security"><FileStack className="size-4" /> File Center</Link>
           </Button>
-          <Button size="sm" variant="outline" onClick={load}>
+          <Button size="sm" variant="outline" onClick={load} aria-label="Sync node list">
             <RefreshCw className="size-4" /> Sync Nodes
           </Button>
         </div>
@@ -231,14 +242,24 @@ function Dashboard() {
               AnyDesk-style access request using a node Remote ID.
             </p>
           </div>
+          <div className="w-full max-w-lg">
+            <input
+              className="mb-2 h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              value={requestReason}
+              onChange={(e) => setRequestReason(e.target.value)}
+              placeholder="Optional reason for request"
+              aria-label="Request reason"
+            />
+          </div>
           <div className="flex w-full max-w-lg items-center gap-2">
             <input
               className="h-9 w-full rounded-md border border-input bg-background px-3 font-mono text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label="Remote ID"
               value={remoteLookup}
-              onChange={(e) => setRemoteLookup(e.target.value)}
+              onChange={(e) => setRemoteLookup(canonicalizeRemoteIdInput(e.target.value))}
               placeholder="e.g. 847-291-563"
             />
-            <Button size="sm" variant="secondary" onClick={quickConnect}>
+            <Button size="sm" variant="secondary" onClick={quickConnect} disabled={!normalizeRemoteIdForLookup(remoteLookup)} aria-label="Request access by remote ID">
               <Search className="size-4" /> Request Access
             </Button>
           </div>
@@ -256,9 +277,6 @@ function Dashboard() {
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {nodes.map((n) => {
-            const overrideDiffers = lanMode !== n.same_lan;
-            const effectiveLocal = lanMode && n.same_lan;
-
             return (
               <Card key={n.id} className="overflow-hidden p-0">
                 <div className="flex items-center justify-between border-b border-border bg-muted/30 px-4 py-3">
@@ -298,6 +316,7 @@ function Dashboard() {
                     className="flex-1"
                     disabled={n.status !== "online" || !lanMode}
                     onClick={() => localAccess(n)}
+                    aria-label={`Start local access for ${n.name}` }
                   >
                     <Wifi className="size-4" /> Local Access
                   </Button>
@@ -307,6 +326,7 @@ function Dashboard() {
                     className="flex-1"
                     disabled={busyId === n.id || n.status !== "online"}
                     onClick={() => requestRemote(n)}
+                    aria-label={`Request remote access for ${n.name}` }
                   >
                     {busyId === n.id ? <Loader2 className="size-4 animate-spin" /> : <ArrowRightLeft className="size-4" />}
                     Remote Access
