@@ -9,6 +9,7 @@ import {
   LogOut,
   Lock,
   Server,
+  Menu,
 } from "lucide-react";
 import {
   Sidebar,
@@ -42,14 +43,14 @@ export function AppShell() {
   return (
     <SidebarProvider>
       <div className="flex min-h-svh w-full bg-background">
-        <Sidebar collapsible="icon">
+        <Sidebar collapsible="icon" aria-label="Primary navigation">
           <SidebarHeader>
             <div className="flex items-center gap-2 px-2 py-1">
               <div className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
                 <Server className="size-4" />
               </div>
               <div className="group-data-[collapsible=icon]:hidden">
-                <div className="text-sm font-semibold tracking-tight">RemoteOps</div>
+                <div className="text-sm font-semibold tracking-tight text-animated-accent">RemoteOps</div>
                 <div className="font-mono text-[10px] text-muted-foreground">v1.0 · secure</div>
               </div>
             </div>
@@ -100,14 +101,18 @@ export function AppShell() {
         </Sidebar>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-10 flex h-12 items-center gap-2 border-b border-border bg-background/80 px-3 backdrop-blur">
-            <SidebarTrigger />
+          <header className="sticky top-0 z-10 flex min-h-12 flex-wrap items-center gap-2 border-b border-border bg-background/90 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/75">
+            <SidebarTrigger className="hidden md:inline-flex" aria-label="Toggle desktop sidebar" />
+            <SidebarTrigger className="md:hidden" aria-label="Toggle mobile sidebar">
+              <Menu className="size-4" />
+              Menu
+            </SidebarTrigger>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Monitor className="size-3.5" />
               <span className="font-mono">remote-desktop-management</span>
               <span className="opacity-50">/</span>
               <FolderTree className="size-3.5" />
-              <span className="font-mono opacity-80">{loc.pathname}</span>
+              <span className="max-w-[40vw] truncate font-mono opacity-80">{loc.pathname}</span>
             </div>
             <div className="ml-auto flex items-center gap-1.5">
               <span className="size-2 rounded-full bg-success pulse-dot text-success" />

@@ -1,0 +1,18 @@
+# Optional override for legacy/full Supabase self-host compose stacks.
+# Use this ONLY if your compose defines services named: auth, rest, realtime, kong.
+#
+# Why: `supabase/gotrue:latest` no longer exists, which causes pulls to fail.
+# This file pins known-good image tags instead of `latest`.
+
+services:
+  auth:
+    image: ${SUPABASE_GOTRUE_IMAGE:-supabase/gotrue:v2.186.0}
+
+  rest:
+    image: ${SUPABASE_POSTGREST_IMAGE:-postgrest/postgrest:v13.0.8}
+
+  realtime:
+    image: ${SUPABASE_REALTIME_IMAGE:-supabase/realtime:v2.51.3}
+
+  kong:
+    image: ${SUPABASE_KONG_IMAGE:-kong:2.8.1}

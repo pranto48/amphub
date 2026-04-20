@@ -8,8 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { StatusDot } from "@/components/StatusDot";
 import { OsIcon } from "@/components/OsIcon";
 import { useAuth } from "@/lib/auth-context";
+import { RouteEmptyState, RouteLoadingState } from "@/components/route-state";
 import {
-  Wifi, Globe, Loader2, ShieldAlert, RefreshCw, Server,
+  Wifi, Globe, Loader2, ShieldAlert, RefreshCw, Server, Search, ArrowRightLeft, FileStack, MonitorCog,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -22,6 +23,14 @@ function Dashboard() {
   const [loading, setLoading] = React.useState(true);
   const [lanMode, setLanMode] = React.useState(true);
   const [busyId, setBusyId] = React.useState<string | null>(null);
+  const [remoteLookup, setRemoteLookup] = React.useState("");
+  const [pendingTimeoutMinutes] = React.useState(DEFAULT_PENDING_TIMEOUT_MINUTES);
+  const [requestReason, setRequestReason] = React.useState("");
+
+  const requesterFingerprint = React.useMemo(() => {
+    if (typeof window === "undefined") return "server";
+    return [window.navigator.userAgent, Intl.DateTimeFormat().resolvedOptions().timeZone, window.location.hostname].join("|");
+  }, []);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -46,11 +55,12 @@ function Dashboard() {
     toast.success(`Local connection initiated to ${node.local_ip}`, {
       description: `Routing through LAN to ${node.name}`,
     });
-    navigate({ to: "/nodes/$id/session", params: { id: node.id } });
+    navigate({ to: "/nodes/$id/session", params: { id: node.id }, search: { local: true } });
   }
 
   async function requestRemote(node: DesktopNode) {
     if (!user) return;
+    void auditModeDecision(node, false);
     setBusyId(node.id);
     const { data, error } = await dataClient.createAccessRequest(node.id);
     setBusyId(null);
@@ -59,101 +69,161 @@ function Dashboard() {
     navigate({ to: "/requests/$id", params: { id: data.id } });
   }
 
+  function quickConnect() {
+    const normalized = normalizeRemoteIdForLookup(remoteLookup.trim());
+    if (!normalized) return;
+    const matched = nodes.find((n) => n.remote_id === normalized);
+    if (!matched) {
+      toast.error("Remote ID not found", { description: "Check the node's Remote ID and try again." });
+      return;
+    }
+    requestRemote(matched);
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Desktop Nodes</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-animated-accent">Desktop Nodes</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Registered remote desktops · {nodes.length} total ·{" "}
+            Registered remote desktops | {nodes.length} total |{" "}
             {nodes.filter((n) => n.status === "online").length} online
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <Button
             variant={lanMode ? "default" : "outline"}
             size="sm"
             onClick={() => setLanMode((v) => !v)}
+            aria-label="Toggle LAN or remote mode"
           >
             {lanMode ? <Wifi className="size-4" /> : <Globe className="size-4" />}
             {lanMode ? "LAN mode" : "Remote mode"}
           </Button>
-          <Button variant="outline" size="sm" onClick={load}>
+          <Button variant="outline" size="sm" onClick={load} aria-label="Refresh nodes">
             <RefreshCw className="size-4" /> Refresh
           </Button>
         </div>
       </div>
+      <Card className="p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild size="sm" variant="secondary" aria-label="Go to session monitor">
+            <Link to="/admin"><MonitorCog className="size-4" /> Session Monitor</Link>
+          </Button>
+          <Button asChild size="sm" variant="outline" aria-label="Open security page">
+            <Link to="/security"><FileStack className="size-4" /> File Center</Link>
+          </Button>
+          <Button size="sm" variant="outline" onClick={load} aria-label="Sync node list">
+            <RefreshCw className="size-4" /> Sync Nodes
+          </Button>
+        </div>
+      </Card>
+      <Card className="p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold">Remote ID access</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              AnyDesk-style access request using a node Remote ID.
+            </p>
+          </div>
+          <div className="w-full max-w-lg">
+            <input
+              className="mb-2 h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              value={requestReason}
+              onChange={(e) => setRequestReason(e.target.value)}
+              placeholder="Optional reason for request"
+              aria-label="Request reason"
+            />
+          </div>
+          <div className="flex w-full max-w-lg items-center gap-2">
+            <input
+              className="h-9 w-full rounded-md border border-input bg-background px-3 font-mono text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label="Remote ID"
+              value={remoteLookup}
+              onChange={(e) => setRemoteLookup(canonicalizeRemoteIdInput(e.target.value))}
+              placeholder="e.g. 847-291-563"
+            />
+            <Button size="sm" variant="secondary" onClick={quickConnect} disabled={!normalizeRemoteIdForLookup(remoteLookup)} aria-label="Request access by remote ID">
+              <Search className="size-4" /> Request Access
+            </Button>
+          </div>
+        </div>
+      </Card>
 
       {loading ? (
-        <div className="flex items-center justify-center py-16">
-          <Loader2 className="size-5 animate-spin text-primary" />
-        </div>
+        <RouteLoadingState label="Loading dashboard nodes" withSkeleton />
       ) : nodes.length === 0 ? (
-        <Card className="p-10 text-center">
-          <Server className="mx-auto size-8 text-muted-foreground" />
-          <p className="mt-3 text-sm text-muted-foreground">No registered nodes yet.</p>
-        </Card>
+        <RouteEmptyState
+          icon={Server}
+          title="No registered nodes yet."
+          description="Add a node to start local or approval-gated remote sessions."
+        />
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {nodes.map((n) => (
-            <Card key={n.id} className="overflow-hidden p-0">
-              <div className="flex items-center justify-between border-b border-border bg-muted/30 px-4 py-3">
-                <div className="flex items-center gap-2.5">
-                  <OsIcon os={n.os} className="size-4 text-primary" />
-                  <div>
-                    <div className="text-sm font-medium">{n.name}</div>
-                    <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                      {n.os}
+          {nodes.map((n) => {
+            return (
+              <Card key={n.id} className="overflow-hidden p-0">
+                <div className="flex items-center justify-between border-b border-border bg-muted/30 px-4 py-3">
+                  <div className="flex items-center gap-2.5">
+                    <OsIcon os={n.os} className="size-4 text-primary" />
+                    <div>
+                      <div className="text-sm font-medium">{n.name}</div>
+                      <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {n.os}
+                      </div>
                     </div>
                   </div>
+                  <StatusDot status={(n.status as "online" | "offline") ?? "offline"} />
                 </div>
-                <StatusDot status={(n.status as "online" | "offline") ?? "offline"} />
-              </div>
 
-              <div className="space-y-3 p-4">
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div>
-                    <div className="text-muted-foreground">Remote ID</div>
-                    <div className="mt-0.5 flex items-center gap-1.5">
-                      <ShieldAlert className="size-3 text-accent" />
-                      <span className="font-mono text-foreground">{n.remote_id}</span>
+                <div className="space-y-3 p-4">
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <div className="text-muted-foreground">Remote ID</div>
+                      <div className="mt-0.5 flex items-center gap-1.5">
+                        <ShieldAlert className="size-3 text-accent" />
+                        <span className="font-mono text-foreground">{n.remote_id}</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Local IP</div>
+                      <div className="mt-0.5 flex items-center gap-1.5">
+                        <Wifi className="size-3 text-primary" />
+                        <span className="font-mono text-foreground">{n.local_ip}</span>
+                      </div>
                     </div>
                   </div>
-                  <div>
-                    <div className="text-muted-foreground">Local IP</div>
-                    <div className="mt-0.5 flex items-center gap-1.5">
-                      <Wifi className="size-3 text-primary" />
-                      <span className="font-mono text-foreground">{n.local_ip}</span>
-                    </div>
-                  </div>
-                </div>
 
                 <div className="flex items-center gap-2 pt-1">
-                  {lanMode ? (
-                    <Button
-                      size="sm"
-                      className="flex-1"
-                      disabled={n.status !== "online"}
-                      onClick={() => localAccess(n)}
-                    >
-                      <Wifi className="size-4" /> Local Access
-                    </Button>
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      className="flex-1"
-                      disabled={busyId === n.id || n.status !== "online"}
-                      onClick={() => requestRemote(n)}
-                    >
-                      {busyId === n.id ? <Loader2 className="size-4 animate-spin" /> : <Globe className="size-4" />}
-                      Request Remote Access
-                    </Button>
-                  )}
+                  <Button
+                    size="sm"
+                    className="flex-1"
+                    disabled={n.status !== "online" || !lanMode}
+                    onClick={() => localAccess(n)}
+                    aria-label={`Start local access for ${n.name}` }
+                  >
+                    <Wifi className="size-4" /> Local Access
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="flex-1"
+                    disabled={busyId === n.id || n.status !== "online"}
+                    onClick={() => requestRemote(n)}
+                    aria-label={`Request remote access for ${n.name}` }
+                  >
+                    {busyId === n.id ? <Loader2 className="size-4 animate-spin" /> : <ArrowRightLeft className="size-4" />}
+                    Remote Access
+                  </Button>
                   <Badge variant="outline" className="font-mono text-[10px]">
                     {n.status === "online" ? "READY" : "OFFLINE"}
                   </Badge>
                 </div>
+                {!lanMode && (
+                  <div className="rounded-md border border-warning/30 bg-warning/10 px-2 py-1 font-mono text-[10px] text-warning">
+                    Remote mode enabled: local-connect path disabled.
+                  </div>
+                )}
               </div>
             </Card>
           ))}

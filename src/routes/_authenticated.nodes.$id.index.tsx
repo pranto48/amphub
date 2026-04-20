@@ -4,9 +4,10 @@ import { dataClient } from "@/lib/data";
 import type { DesktopNode } from "@/lib/data/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, FolderOpen, Monitor as MonitorIcon, ArrowLeft } from "lucide-react";
+import { FolderOpen, Monitor as MonitorIcon, ArrowLeft } from "lucide-react";
 import { OsIcon } from "@/components/OsIcon";
 import { StatusDot } from "@/components/StatusDot";
+import { RouteLoadingState } from "@/components/route-state";
 
 export const Route = createFileRoute("/_authenticated/nodes/$id/")({ component: NodeDetail });
 
@@ -19,7 +20,7 @@ function NodeDetail() {
     dataClient.getNode(id).then((n) => { setNode(n); setLoading(false); });
   }, [id]);
 
-  if (loading) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;
+  if (loading) return <RouteLoadingState label="Loading node details" withSkeleton />;
   if (!node) return <Card className="p-8">Node not found.</Card>;
 
   return (
@@ -44,12 +45,12 @@ function NodeDetail() {
 
         <div className="mt-6 grid grid-cols-2 gap-3">
           <Button asChild variant="outline">
-            <Link to="/nodes/$id/files" params={{ id: node.id }}>
+            <Link to="/nodes/$id/files" params={{ id: node.id }} search={{ local: true }}>
               <FolderOpen className="size-4" /> File Explorer
             </Link>
           </Button>
           <Button asChild>
-            <Link to="/nodes/$id/session" params={{ id: node.id }}>
+            <Link to="/nodes/$id/session" params={{ id: node.id }} search={{ local: true }}>
               <MonitorIcon className="size-4" /> Open Remote Session
             </Link>
           </Button>

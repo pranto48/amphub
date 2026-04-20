@@ -1,0 +1,17 @@
+[Unit]
+Description=AmpHub Remote Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/amphub-agent run
+ExecStop=/usr/local/bin/amphub-agent cleanup
+Restart=always
+RestartSec=5
+User=root
+Environment=AMPHUB_AGENT_CONFIG=/etc/amphub-agent/config.json
+Environment=AMPHUB_AGENT_STATE=/var/lib/amphub-agent/state.json
+
+[Install]
+WantedBy=multi-user.target
