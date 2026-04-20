@@ -1,6 +1,7 @@
 import * as React from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { supabase } from "@/integrations/supabase/client";
+import { dataClient } from "@/lib/data";
+import type { AccessRequest } from "@/lib/data/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, Hourglass, CheckCircle2, XCircle, ArrowRight } from "lucide-react";
@@ -8,45 +9,30 @@ import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/requests/$id")({ component: RequestPage });
 
-type Req = {
-  id: string;
-  node_id: string;
-  status: string;
-  session_token: string | null;
-  expires_at: string | null;
-};
-
 function RequestPage() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
-  const [req, setReq] = React.useState<Req | null>(null);
+  const [req, setReq] = React.useState<AccessRequest | null>(null);
   const [loading, setLoading] = React.useState(true);
 
   const load = React.useCallback(async () => {
-    const { data, error } = await supabase
-      .from("access_requests")
-      .select("id,node_id,status,session_token,expires_at")
-      .eq("id", id)
-      .maybeSingle();
-    if (error) toast.error(error.message);
-    setReq(data as Req | null);
+    try {
+      setReq(await dataClient.getAccessRequest(id));
+    } catch (e) { toast.error((e as Error).message); }
     setLoading(false);
   }, [id]);
 
   React.useEffect(() => { load(); }, [load]);
 
   React.useEffect(() => {
-    const ch = supabase
-      .channel(`req-${id}`)
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "access_requests", filter: `id=eq.${id}` },
-        (payload) => {
-          const next = payload.new as Req;
-          setReq(next);
-          if (next.status === "approved") toast.success("Access granted");
-          if (next.status === "denied") toast.error("Access denied");
-        })
-      .subscribe();
-    return () => { supabase.removeChannel(ch); };
+    const unsub = dataClient.subscribe((evt) => {
+      if (evt.table === "access_requests" && evt.row.id === id) {
+        setReq(evt.row);
+        if (evt.row.status === "approved") toast.success("Access granted");
+        if (evt.row.status === "denied") toast.error("Access denied");
+      }
+    });
+    return () => unsub();
   }, [id]);
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;

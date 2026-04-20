@@ -1,6 +1,7 @@
 import * as React from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { supabase } from "@/integrations/supabase/client";
+import { dataClient } from "@/lib/data";
+import type { DesktopNode } from "@/lib/data/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, FolderOpen, Monitor as MonitorIcon, ArrowLeft } from "lucide-react";
@@ -9,18 +10,13 @@ import { StatusDot } from "@/components/StatusDot";
 
 export const Route = createFileRoute("/_authenticated/nodes/$id/")({ component: NodeDetail });
 
-type Node = { id: string; name: string; remote_id: string; local_ip: string; os: string; status: string; last_seen: string | null };
-
 function NodeDetail() {
   const { id } = Route.useParams();
-  const [node, setNode] = React.useState<Node | null>(null);
+  const [node, setNode] = React.useState<DesktopNode | null>(null);
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
-    supabase.from("desktop_nodes").select("*").eq("id", id).maybeSingle().then(({ data }) => {
-      setNode(data as Node | null);
-      setLoading(false);
-    });
+    dataClient.getNode(id).then((n) => { setNode(n); setLoading(false); });
   }, [id]);
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div>;

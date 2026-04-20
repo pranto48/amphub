@@ -1,31 +1,21 @@
 import * as React from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { supabase } from "@/integrations/supabase/client";
+import { dataClient } from "@/lib/data";
+import type { AccessRequest, AuditEntry } from "@/lib/data/types";
 import { useAuth } from "@/lib/auth-context";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import {
-  Loader2, Check, X, ShieldAlert, Activity, ScrollText,
-} from "lucide-react";
+import { Loader2, Check, X, ShieldAlert, Activity, ScrollText } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/admin")({ component: AdminPanel });
 
-type ReqRow = {
-  id: string;
-  node_id: string;
-  requester_id: string;
-  status: string;
-  requested_at: string;
-};
-type Audit = { id: string; action: string; target: string | null; created_at: string };
-
 function AdminPanel() {
-  const { isAdmin, user } = useAuth();
+  const { isAdmin } = useAuth();
   const navigate = useNavigate();
-  const [pending, setPending] = React.useState<ReqRow[]>([]);
-  const [audit, setAudit] = React.useState<Audit[]>([]);
+  const [pending, setPending] = React.useState<AccessRequest[]>([]);
+  const [audit, setAudit] = React.useState<AuditEntry[]>([]);
   const [nodeMap, setNodeMap] = React.useState<Record<string, string>>({});
   const [loading, setLoading] = React.useState(true);
 
@@ -34,14 +24,18 @@ function AdminPanel() {
   }, [isAdmin, navigate]);
 
   const load = React.useCallback(async () => {
-    const [{ data: reqs }, { data: nodes }, { data: a }] = await Promise.all([
-      supabase.from("access_requests").select("*").eq("status", "pending").order("requested_at", { ascending: false }),
-      supabase.from("desktop_nodes").select("id,name"),
-      supabase.from("audit_log").select("id,action,target,created_at").order("created_at", { ascending: false }).limit(20),
-    ]);
-    setPending((reqs ?? []) as ReqRow[]);
-    setNodeMap(Object.fromEntries((nodes ?? []).map((n: { id: string; name: string }) => [n.id, n.name])));
-    setAudit((a ?? []) as Audit[]);
+    try {
+      const [reqs, nodes, a] = await Promise.all([
+        dataClient.listPendingRequests(),
+        dataClient.listNodes(),
+        dataClient.listAudit(20),
+      ]);
+      setPending(reqs);
+      setNodeMap(Object.fromEntries(nodes.map((n) => [n.id, n.name])));
+      setAudit(a);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
     setLoading(false);
   }, []);
 
@@ -49,37 +43,21 @@ function AdminPanel() {
 
   React.useEffect(() => {
     if (!isAdmin) return;
-    const ch = supabase
-      .channel("admin-requests")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "access_requests" }, (payload) => {
-        const r = payload.new as ReqRow;
-        toast.warning("New access request", { description: `Requester awaiting approval` });
-        setPending((p) => [r, ...p]);
-      })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "access_requests" }, () => load())
-      .subscribe();
-    return () => { supabase.removeChannel(ch); };
+    const unsub = dataClient.subscribe((evt) => {
+      if (evt.table !== "access_requests") return;
+      if (evt.type === "INSERT") {
+        toast.warning("New access request", { description: "Requester awaiting approval" });
+        setPending((p) => [evt.row, ...p.filter((r) => r.id !== evt.row.id)]);
+      } else if (evt.type === "UPDATE") {
+        load();
+      }
+    });
+    return () => unsub();
   }, [isAdmin, load]);
 
-  async function decide(req: ReqRow, approve: boolean) {
-    if (!user) return;
-    const update = approve
-      ? {
-          status: "approved",
-          decided_at: new Date().toISOString(),
-          decided_by: user.id,
-          session_token: crypto.randomUUID().replace(/-/g, ""),
-          expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-        }
-      : { status: "denied", decided_at: new Date().toISOString(), decided_by: user.id };
-    const { error } = await supabase.from("access_requests").update(update).eq("id", req.id);
-    if (error) { toast.error(error.message); return; }
-    await supabase.from("audit_log").insert({
-      actor_id: user.id,
-      action: approve ? "approve_access" : "deny_access",
-      target: req.node_id,
-      metadata: { request_id: req.id },
-    });
+  async function decide(req: AccessRequest, approve: boolean) {
+    const { error } = await dataClient.decideAccessRequest(req.id, approve);
+    if (error) { toast.error(error); return; }
     toast.success(approve ? "Approved" : "Denied");
     setPending((p) => p.filter((r) => r.id !== req.id));
     load();

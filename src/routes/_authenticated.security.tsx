@@ -1,7 +1,8 @@
 import * as React from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
-import { supabase } from "@/integrations/supabase/client";
+import { dataClient } from "@/lib/data";
+import type { DesktopNode } from "@/lib/data/types";
 import { useAuth } from "@/lib/auth-context";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -12,8 +13,6 @@ import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/security")({ component: SecurityPage });
 
-type Node = { id: string; name: string; remote_id: string };
-
 async function hashPassword(s: string): Promise<string> {
   const enc = new TextEncoder().encode(s);
   const buf = await crypto.subtle.digest("SHA-256", enc);
@@ -22,29 +21,25 @@ async function hashPassword(s: string): Promise<string> {
 
 function SecurityPage() {
   const { isAdmin } = useAuth();
-  const [nodes, setNodes] = React.useState<Node[]>([]);
+  const [nodes, setNodes] = React.useState<DesktopNode[]>([]);
   const [pwd, setPwd] = React.useState<Record<string, string>>({});
   const [busy, setBusy] = React.useState<string | null>(null);
   const [newPwd, setNewPwd] = React.useState("");
   const [savingOwn, setSavingOwn] = React.useState(false);
 
   React.useEffect(() => {
-    if (isAdmin) {
-      supabase.from("desktop_nodes").select("id,name,remote_id").order("name").then(({ data }) => {
-        setNodes((data ?? []) as Node[]);
-      });
-    }
+    if (isAdmin) dataClient.listNodes().then(setNodes).catch((e) => toast.error((e as Error).message));
   }, [isAdmin]);
 
-  async function setMaster(node: Node) {
+  async function setMaster(node: DesktopNode) {
     const v = pwd[node.id]?.trim() ?? "";
     const parsed = z.string().min(8).max(128).safeParse(v);
     if (!parsed.success) { toast.error("Master password must be 8–128 chars"); return; }
     setBusy(node.id);
     const hash = await hashPassword(parsed.data);
-    const { error } = await supabase.from("desktop_nodes").update({ master_password_hash: hash }).eq("id", node.id);
+    const { error } = await dataClient.setNodeMasterPassword(node.id, hash);
     setBusy(null);
-    if (error) toast.error(error.message);
+    if (error) toast.error(error);
     else { toast.success(`Master password updated for ${node.name}`); setPwd((p) => ({ ...p, [node.id]: "" })); }
   }
 
@@ -52,9 +47,9 @@ function SecurityPage() {
     const parsed = z.string().min(8).max(128).safeParse(newPwd);
     if (!parsed.success) { toast.error("Password must be 8–128 chars"); return; }
     setSavingOwn(true);
-    const { error } = await supabase.auth.updateUser({ password: parsed.data });
+    const { error } = await dataClient.updatePassword(parsed.data);
     setSavingOwn(false);
-    if (error) toast.error(error.message);
+    if (error) toast.error(error);
     else { toast.success("Password updated"); setNewPwd(""); }
   }
 

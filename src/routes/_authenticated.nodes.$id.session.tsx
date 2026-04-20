@@ -1,6 +1,6 @@
 import * as React from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { supabase } from "@/integrations/supabase/client";
+import { dataClient } from "@/lib/data";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -18,8 +18,8 @@ function RemoteSession() {
   const containerRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
-    supabase.from("desktop_nodes").select("name,remote_id,local_ip,os").eq("id", id).maybeSingle().then(({ data }) => {
-      setName(data?.name ?? "node");
+    dataClient.getNode(id).then((n) => {
+      setName(n?.name ?? "node");
       setLoading(false);
     });
   }, [id]);
