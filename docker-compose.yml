@@ -1,34 +1,44 @@
 services:
-  app:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: remoteops
+      POSTGRES_PASSWORD: remoteops
+      POSTGRES_DB: remoteops
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./server/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U remoteops -d remoteops"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ./server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://remoteops:remoteops@db:5432/remoteops
+      JWT_SECRET: ${JWT_SECRET:-please-change-me}
+      CORS_ORIGIN: "*"
+      PORT: "4000"
+    expose:
+      - "4000"
+
+  web:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "4455:4455"
-    environment:
-      NODE_ENV: production
-      PORT: 4455
-      # Point these to your local/self-hosted Supabase gateway
-      VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-http://localhost:8000}
-      VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:-local-dev-anon-key}
-      SUPABASE_URL: ${SUPABASE_URL:-http://localhost:8000}
-      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-local-dev-anon-key}
-    depends_on:
-      - db
-
-  db:
-    image: postgres:16-alpine
-    container_name: remoteops-db
     restart: unless-stopped
-    environment:
-      POSTGRES_DB: remoteops
-      POSTGRES_USER: remoteops
-      POSTGRES_PASSWORD: remoteops_strong_password_change_me
+    depends_on:
+      - api
     ports:
-      - "5433:5432"
-    volumes:
-      - remoteops-db-data:/var/lib/postgresql/data
-      - ./docker/postgres/init:/docker-entrypoint-initdb.d
+      - "8080:80"
 
 volumes:
-  remoteops-db-data:
+  db_data:

@@ -1,7 +1,8 @@
 import * as React from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
-import { supabase } from "@/integrations/supabase/client";
+import { dataClient } from "@/lib/data";
+import type { DesktopNode } from "@/lib/data/types";
 import { useAuth } from "@/lib/auth-context";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -12,14 +13,6 @@ import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/security")({ component: SecurityPage });
 
-type Node = {
-  id: string;
-  name: string;
-  remote_id: string;
-  master_password_hash: string | null;
-  updated_at: string;
-};
-
 async function hashPassword(s: string): Promise<string> {
   const enc = new TextEncoder().encode(s);
   const buf = await crypto.subtle.digest("SHA-256", enc);
@@ -28,7 +21,7 @@ async function hashPassword(s: string): Promise<string> {
 
 function SecurityPage() {
   const { isAdmin } = useAuth();
-  const [nodes, setNodes] = React.useState<Node[]>([]);
+  const [nodes, setNodes] = React.useState<DesktopNode[]>([]);
   const [pwd, setPwd] = React.useState<Record<string, string>>({});
   const [confirmPwd, setConfirmPwd] = React.useState<Record<string, string>>({});
   const [busy, setBusy] = React.useState<string | null>(null);
@@ -37,50 +30,47 @@ function SecurityPage() {
   const [savingOwn, setSavingOwn] = React.useState(false);
 
   React.useEffect(() => {
-    if (isAdmin) {
-      supabase.from("desktop_nodes").select("id,name,remote_id,master_password_hash,updated_at").order("name").then(({ data }) => {
-        setNodes((data ?? []) as Node[]);
-      });
-    }
+    if (isAdmin) dataClient.listNodes().then(setNodes).catch((e) => toast.error((e as Error).message));
   }, [isAdmin]);
 
-  React.useEffect(() => {
-    void loadNodes();
-  }, [loadNodes]);
-
-  async function setMaster(node: Node) {
+  async function setMaster(node: DesktopNode) {
     const v = pwd[node.id]?.trim() ?? "";
     const parsed = z.string().min(8).max(128).safeParse(v);
-    if (!parsed.success) { toast.error("Master password must be 8-128 chars"); return; }
+    if (!parsed.success) {
+      toast.error("Master password must be 8-128 chars");
+      return;
+    }
+
     if (parsed.data !== (confirmPwd[node.id]?.trim() ?? "")) {
       toast.error("Master password confirmation does not match");
       return;
     }
+
     setBusy(node.id);
-    const { data, error } = await supabase.rpc("set_node_master_password", {
-      p_node_id: node.id,
-      p_password: parsed.data,
-    });
+    const hash = await hashPassword(parsed.data);
+    const { error } = await dataClient.setNodeMasterPassword(node.id, hash);
     setBusy(null);
-    if (error) toast.error(error.message);
-    else {
-      toast.success(`Master password updated for ${node.name}`);
-      setPwd((p) => ({ ...p, [node.id]: "" }));
-      setConfirmPwd((p) => ({ ...p, [node.id]: "" }));
-      setNodes((prev) => prev.map((n) => (n.id === node.id ? { ...n, master_password_hash: hash, updated_at: new Date().toISOString() } : n)));
-    }
+    if (error) toast.error(error);
+    else { toast.success(`Master password updated for ${node.name}`); setPwd((p) => ({ ...p, [node.id]: "" })); }
   }
 
   async function changeOwn() {
     const parsed = z.string().min(8).max(128).safeParse(newPwd);
-    if (!parsed.success) { toast.error("Password must be 8-128 chars"); return; }
-    if (parsed.data !== confirmOwnPwd) { toast.error("Password confirmation does not match"); return; }
-    setSavingOwn(true);
-    const { error } = await supabase.auth.updateUser({ password: parsed.data });
-    setSavingOwn(false);
+    if (!parsed.success) {
+      toast.error("Password must be 8-128 chars");
+      return;
+    }
 
-    if (error) toast.error(error.message);
-    else { toast.success("Password updated"); setNewPwd(""); setConfirmOwnPwd(""); }
+    if (parsed.data !== confirmOwnPwd) {
+      toast.error("Password confirmation does not match");
+      return;
+    }
+
+    setSavingOwn(true);
+    const { error } = await dataClient.updatePassword(parsed.data);
+    setSavingOwn(false);
+    if (error) toast.error(error);
+    else { toast.success("Password updated"); setNewPwd(""); }
   }
 
   return (
@@ -117,7 +107,7 @@ function SecurityPage() {
             <h2 className="text-sm font-semibold">Per-node master passwords</h2>
           </div>
           <p className="mb-4 text-xs text-muted-foreground">
-            Stored with bcrypt KDF and verified server-side with lockout and throttle controls.
+            Stored with bcrypt + per-password salt and verified server-side with lockout and throttling controls.
           </p>
           <div className="space-y-3">
             {nodes.map((n) => (
@@ -133,7 +123,12 @@ function SecurityPage() {
                         {n.master_password_hash ? "Configured" : "Not set"}
                       </div>
                       <div className="text-[10px] text-muted-foreground">
-                        Updated {new Date(n.updated_at).toLocaleString()}
+                        Algo {n.password_algo ?? "-"} · v{n.password_version} · Updated{" "}
+                        {n.password_updated_at ? new Date(n.password_updated_at).toLocaleString() : "-"}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">
+                        Failed attempts: {n.failed_attempts}
+                        {n.locked_until ? ` · Locked until ${new Date(n.locked_until).toLocaleString()}` : ""}
                       </div>
                     </div>
                   </div>
@@ -151,7 +146,7 @@ function SecurityPage() {
                     value={confirmPwd[n.id] ?? ""}
                     onChange={(e) => setConfirmPwd((p) => ({ ...p, [n.id]: e.target.value }))}
                   />
-                  <Button size="sm" onClick={() => setMaster(n)} disabled={busy === n.id}>
+                  <Button size="sm" onClick={() => void setMaster(n)} disabled={busy === n.id}>
                     {busy === n.id ? <Loader2 className="size-4 animate-spin" /> : "Set"}
                   </Button>
                 </div>

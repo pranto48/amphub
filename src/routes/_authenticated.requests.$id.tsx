@@ -1,6 +1,7 @@
 import * as React from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { supabase } from "@/integrations/supabase/client";
+import { dataClient } from "@/lib/data";
+import type { AccessRequest } from "@/lib/data/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,59 +12,31 @@ import { RouteLoadingState } from "@/components/route-state";
 
 export const Route = createFileRoute("/_authenticated/requests/$id")({ component: RequestPage });
 
-type ReqStatus = "pending" | "approved" | "denied" | "revoked" | "expired";
-
-type Req = {
-  id: string;
-  node_id: string;
-  status: ReqStatus;
-  session_token: string | null;
-  expires_at: string | null;
-  request_reason: string | null;
-  status_reason_code: string | null;
-  status_reason_message: string | null;
-  pending_expires_at: string | null;
-};
-
 function RequestPage() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
-  const [req, setReq] = React.useState<Req | null>(null);
+  const [req, setReq] = React.useState<AccessRequest | null>(null);
   const [loading, setLoading] = React.useState(true);
 
   const load = React.useCallback(async () => {
-    await supabase.rpc("expire_access_requests");
-    const { data, error } = await supabase
-      .from("access_requests")
-      .select("id,node_id,status,session_token,expires_at,request_reason,status_reason_code,status_reason_message,pending_expires_at")
-      .eq("id", id)
-      .maybeSingle();
-    if (error) toast.error(error.message);
-    setReq(data as Req | null);
+    try {
+      setReq(await dataClient.getAccessRequest(id));
+    } catch (e) { toast.error((e as Error).message); }
     setLoading(false);
   }, [id]);
 
   React.useEffect(() => { load(); }, [load]);
 
   React.useEffect(() => {
-    const refresh = window.setInterval(load, 30_000);
-    const ch = supabase
-      .channel(`req-${id}`)
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "access_requests", filter: `id=eq.${id}` },
-        (payload) => {
-          const next = payload.new as Req;
-          setReq(next);
-          if (next.status === "approved") toast.success("Access granted");
-          if (next.status === "denied") toast.error("Access denied");
-          if (next.status === "revoked") toast.error("Approval revoked");
-          if (next.status === "expired") toast.warning("Approval expired");
-        })
-      .subscribe();
-    return () => {
-      window.clearInterval(refresh);
-      supabase.removeChannel(ch);
-    };
-  }, [id, load]);
+    const unsub = dataClient.subscribe((evt) => {
+      if (evt.table === "access_requests" && evt.row.id === id) {
+        setReq(evt.row);
+        if (evt.row.status === "approved") toast.success("Access granted");
+        if (evt.row.status === "denied") toast.error("Access denied");
+      }
+    });
+    return () => unsub();
+  }, [id]);
 
   if (loading) return <RouteLoadingState label="Loading access request" withSkeleton />;
   if (!req) return <Card className="p-8">Request not found.</Card>;
@@ -107,7 +80,7 @@ function RequestPage() {
               onClick={() => navigate({
                 to: "/nodes/$id/session",
                 params: { id: req.node_id },
-                search: { requestId: req.id },
+                search: { requestId: req.id, sessionToken: req.session_token ?? undefined },
               })}
             >
               Launch session <ArrowRight className="size-4" />

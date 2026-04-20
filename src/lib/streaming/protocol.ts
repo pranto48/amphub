@@ -19,6 +19,10 @@ export type ControlMessageType =
   | "input.pointer_wheel"
   | "control.ctrl_alt_del"
   | "control.disconnect"
+  | "control.accepted"
+  | "control.completed"
+  | "control.rejected"
+  | "media.stats"
   | "file.list"
   | "file.upload.begin"
   | "file.upload.chunk"
@@ -104,4 +108,13 @@ export interface AuditProtocolEvent {
   kid?: string;
   error_code?: string;
   error_message?: string;
+}
+
+
+export interface StreamCapabilities {
+  adapters: Array<"webrtc" | "rdp" | "vnc">;
+  controlChannel: "supabase-realtime" | "wss";
+  supportsKeyboard: boolean;
+  supportsPointer: boolean;
+  supportsClipboard: boolean;
 }

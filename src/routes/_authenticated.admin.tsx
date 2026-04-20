@@ -114,13 +114,10 @@ function stringifyExport(format: "csv" | "json", rows: Audit[]) {
 }
 
 function AdminPanel() {
-  const { isAdmin, user } = useAuth();
+  const { isAdmin } = useAuth();
   const navigate = useNavigate();
-
-  const [pending, setPending] = React.useState<ReqRow[]>([]);
-  const [approved, setApproved] = React.useState<ReqRow[]>([]);
-  const [sessions, setSessions] = React.useState<ActiveSession[]>([]);
-  const [audit, setAudit] = React.useState<Audit[]>([]);
+  const [pending, setPending] = React.useState<AccessRequest[]>([]);
+  const [audit, setAudit] = React.useState<AuditEntry[]>([]);
   const [nodeMap, setNodeMap] = React.useState<Record<string, string>>({});
   const [requesterMap, setRequesterMap] = React.useState<Record<string, RequesterInfo>>({});
 
@@ -348,42 +345,15 @@ function AdminPanel() {
       p_format: format,
       p_event_type: auditFilter === "all" ? null : auditFilter,
     });
+    return () => unsub();
+  }, [isAdmin, load]);
 
-    setExporting(null);
-    if (error || !data) {
-      notify("error", "Export failed", error?.message ?? "No data returned");
-      return;
-    }
-
-    const mime = format === "csv" ? "text/csv;charset=utf-8" : "application/json;charset=utf-8";
-    const blob = new Blob([data], { type: mime });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `incident-review-${new Date().toISOString().replaceAll(":", "-")}.${format}`;
-    link.click();
-    URL.revokeObjectURL(link.href);
-
-    notify("success", "Incident export ready", `Downloaded ${format.toUpperCase()} incident review file.`);
-  }
-
-  function exportAuditReport(format: "csv" | "json") {
-    setAuditExporting(format);
-
-    const reportRows = audit.filter((a) =>
-      a.action.includes("approve") || a.action.includes("deny") || a.action.includes("revoke") || a.action.includes("terminate"),
-    );
-
-    const payload = stringifyExport(format, reportRows);
-    const mime = format === "csv" ? "text/csv;charset=utf-8" : "application/json;charset=utf-8";
-    const blob = new Blob([payload], { type: mime });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `audit-approval-report-${new Date().toISOString().replaceAll(":", "-")}.${format}`;
-    link.click();
-    URL.revokeObjectURL(link.href);
-    setAuditExporting(null);
-
-    notify("success", "Audit report exported", `Downloaded ${reportRows.length} ${format.toUpperCase()} records.`);
+  async function decide(req: AccessRequest, approve: boolean) {
+    const { error } = await dataClient.decideAccessRequest(req.id, approve);
+    if (error) { toast.error(error); return; }
+    toast.success(approve ? "Approved" : "Denied");
+    setPending((p) => p.filter((r) => r.id !== req.id));
+    load();
   }
 
   if (!isAdmin) return null;

@@ -83,7 +83,7 @@ function getRequesterNetworkHints() {
 function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [nodes, setNodes] = React.useState<Node[]>([]);
+  const [nodes, setNodes] = React.useState<DesktopNode[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [lanMode, setLanMode] = React.useState(true);
   const [busyId, setBusyId] = React.useState<string | null>(null);
@@ -98,43 +98,22 @@ function Dashboard() {
 
   const load = React.useCallback(async () => {
     setLoading(true);
-    const { requesterIp, hints } = getRequesterNetworkHints();
-
-    const { data, error } = await supabase
-      .rpc("dashboard_nodes_with_lan", {
-        p_requester_ip: requesterIp,
-        p_requester_hints: hints,
-      });
-
-    if (error) toast.error(error.message);
-    setNodes((data ?? []) as Node[]);
+    try {
+      setNodes(await dataClient.listNodes());
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
     setLoading(false);
   }, []);
 
   React.useEffect(() => { load(); }, [load]);
 
   React.useEffect(() => {
-    const ch = supabase
-      .channel("nodes-realtime")
-      .on("postgres_changes", { event: "*", schema: "public", table: "desktop_nodes" }, () => load())
-      .subscribe();
-    return () => { supabase.removeChannel(ch); };
-  }, [load]);
-
-  async function auditModeDecision(node: Node, effectiveLocal: boolean) {
-    const overrideDiffers = lanMode !== node.same_lan;
-    const { requesterIp, hints } = getRequesterNetworkHints();
-
-    await supabase.rpc("audit_access_mode_decision", {
-      p_node_id: node.id,
-      p_detected_same_lan: node.same_lan,
-      p_manual_lan_mode: lanMode,
-      p_effective_mode: effectiveLocal ? "local_lan" : "remote_request",
-      p_detection_source: node.lan_detection_source,
-      p_requester_hints: requesterIp ? Array.from(new Set([requesterIp, ...hints])) : hints,
-      p_override_differs: overrideDiffers,
+    const unsub = dataClient.subscribe((evt) => {
+      if (evt.table === "desktop_nodes") load();
     });
-  }
+    return () => unsub();
+  }, [load]);
 
   async function localAccess(node: Node) {
     void auditModeDecision(node, true);
@@ -144,44 +123,14 @@ function Dashboard() {
     navigate({ to: "/nodes/$id/session", params: { id: node.id }, search: { local: true } });
   }
 
-  async function requestRemote(node: Node) {
+  async function requestRemote(node: DesktopNode) {
     if (!user) return;
     void auditModeDecision(node, false);
     setBusyId(node.id);
-    const throttle = await supabase.rpc("guard_access_request_submission", {
-      p_node_id: node.id,
-      p_requester_id: user.id,
-      p_client_fingerprint: requesterFingerprint,
-    });
-    const throttleResult = throttle.data?.[0];
-    if (!throttleResult?.allowed) {
-      setBusyId(null);
-      toast.error("Request rate limited", {
-        description: throttleResult?.locked_until
-          ? `Too many requests. Retry after ${new Date(throttleResult.locked_until).toLocaleTimeString()}.`
-          : throttleResult?.denial_reason ?? "rate_limited",
-      });
-      return;
-    }
-    const { data, error } = await supabase
-      .from("access_requests")
-      .insert({
-        node_id: node.id,
-        requester_id: user.id,
-        status: "pending",
-        requester_identity: user.user_metadata?.display_name ?? user.email ?? user.id,
-        node_name: node.name,
-        location_hint: Intl.DateTimeFormat().resolvedOptions().timeZone ?? null,
-        request_reason: requestReason.trim() || null,
-        status_reason_code: "awaiting_admin_decision",
-        status_reason_message: "Waiting for admin review",
-        pending_expires_at: new Date(Date.now() + pendingTimeoutMinutes * 60 * 1000).toISOString(),
-      })
-      .select()
-      .single();
+    const { data, error } = await dataClient.createAccessRequest(node.id);
     setBusyId(null);
-    if (error) { toast.error(error.message); return; }
-    toast.info("Access request sent", { description: `Request created for ${node.name}. Awaiting admin approval...` });
+    if (error || !data) { toast.error(error ?? "Failed to create request"); return; }
+    toast.info("Access request sent", { description: "Awaiting admin approval…" });
     navigate({ to: "/requests/$id", params: { id: data.id } });
   }
 

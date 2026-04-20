@@ -1,7 +1,6 @@
 import * as React from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { z } from "zod";
-import { supabase } from "@/integrations/supabase/client";
+import { dataClient } from "@/lib/data";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,6 +28,7 @@ export const Route = createFileRoute("/_authenticated/nodes/$id/files")({
   validateSearch: z.object({
     local: z.coerce.boolean().optional(),
     requestId: z.string().uuid().optional(),
+    sessionToken: z.string().min(1).optional(),
   }),
   component: FileExplorer,
 });
@@ -111,15 +111,10 @@ function FileExplorer() {
   const [authChecked, setAuthChecked] = React.useState(false);
 
   React.useEffect(() => {
-    supabase
-      .from("desktop_nodes")
-      .select("name")
-      .eq("id", id)
-      .maybeSingle()
-      .then(({ data }) => {
-        setNodeName(data?.name ?? "");
-        setLoading(false);
-      });
+    dataClient.getNode(id).then((n) => {
+      setNodeName(n?.name ?? "");
+      setLoading(false);
+    });
   }, [id]);
 
   React.useEffect(() => {
@@ -174,7 +169,7 @@ function FileExplorer() {
       p_action: action,
       p_request_id: search.requestId ?? null,
       p_requester_id: user?.id ?? null,
-      p_session_token: null,
+      p_session_token: search.sessionToken ?? null,
       p_local: search.local ?? false,
       p_metadata: metadata,
     });
