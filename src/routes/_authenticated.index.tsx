@@ -1,6 +1,7 @@
 import * as React from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { supabase } from "@/integrations/supabase/client";
+import { dataClient } from "@/lib/data";
+import type { DesktopNode } from "@/lib/data/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -14,62 +15,46 @@ import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/")({ component: Dashboard });
 
-type Node = {
-  id: string;
-  name: string;
-  remote_id: string;
-  local_ip: string;
-  os: string;
-  status: string;
-  last_seen: string | null;
-};
-
 function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [nodes, setNodes] = React.useState<Node[]>([]);
+  const [nodes, setNodes] = React.useState<DesktopNode[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [lanMode, setLanMode] = React.useState(true);
   const [busyId, setBusyId] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("desktop_nodes")
-      .select("*")
-      .order("name");
-    if (error) toast.error(error.message);
-    setNodes((data ?? []) as Node[]);
+    try {
+      setNodes(await dataClient.listNodes());
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
     setLoading(false);
   }, []);
 
   React.useEffect(() => { load(); }, [load]);
 
   React.useEffect(() => {
-    const ch = supabase
-      .channel("nodes-realtime")
-      .on("postgres_changes", { event: "*", schema: "public", table: "desktop_nodes" }, () => load())
-      .subscribe();
-    return () => { supabase.removeChannel(ch); };
+    const unsub = dataClient.subscribe((evt) => {
+      if (evt.table === "desktop_nodes") load();
+    });
+    return () => unsub();
   }, [load]);
 
-  async function localAccess(node: Node) {
+  async function localAccess(node: DesktopNode) {
     toast.success(`Local connection initiated to ${node.local_ip}`, {
       description: `Routing through LAN to ${node.name}`,
     });
     navigate({ to: "/nodes/$id/session", params: { id: node.id } });
   }
 
-  async function requestRemote(node: Node) {
+  async function requestRemote(node: DesktopNode) {
     if (!user) return;
     setBusyId(node.id);
-    const { data, error } = await supabase
-      .from("access_requests")
-      .insert({ node_id: node.id, requester_id: user.id, status: "pending" })
-      .select()
-      .single();
+    const { data, error } = await dataClient.createAccessRequest(node.id);
     setBusyId(null);
-    if (error) { toast.error(error.message); return; }
+    if (error || !data) { toast.error(error ?? "Failed to create request"); return; }
     toast.info("Access request sent", { description: "Awaiting admin approval…" });
     navigate({ to: "/requests/$id", params: { id: data.id } });
   }
