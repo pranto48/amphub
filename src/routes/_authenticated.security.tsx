@@ -1,7 +1,8 @@
 import * as React from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
-import { supabase } from "@/integrations/supabase/client";
+import { dataClient } from "@/lib/data";
+import type { DesktopNode } from "@/lib/data/types";
 import { useAuth } from "@/lib/auth-context";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -12,21 +13,15 @@ import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/security")({ component: SecurityPage });
 
-type Node = {
-  id: string;
-  name: string;
-  remote_id: string;
-  master_password_hash: string | null;
-  password_algo: string | null;
-  password_updated_at: string | null;
-  password_version: number;
-  failed_attempts: number;
-  locked_until: string | null;
-};
+async function hashPassword(s: string): Promise<string> {
+  const enc = new TextEncoder().encode(s);
+  const buf = await crypto.subtle.digest("SHA-256", enc);
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 function SecurityPage() {
   const { isAdmin } = useAuth();
-  const [nodes, setNodes] = React.useState<Node[]>([]);
+  const [nodes, setNodes] = React.useState<DesktopNode[]>([]);
   const [pwd, setPwd] = React.useState<Record<string, string>>({});
   const [confirmPwd, setConfirmPwd] = React.useState<Record<string, string>>({});
   const [busy, setBusy] = React.useState<string | null>(null);
@@ -34,30 +29,11 @@ function SecurityPage() {
   const [confirmOwnPwd, setConfirmOwnPwd] = React.useState("");
   const [savingOwn, setSavingOwn] = React.useState(false);
 
-  const loadNodes = React.useCallback(async () => {
-    if (!isAdmin) {
-      setNodes([]);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("desktop_nodes")
-      .select("id,name,remote_id,master_password_hash,password_algo,password_updated_at,password_version,failed_attempts,locked_until")
-      .order("name");
-
-    if (error) {
-      toast.error("Failed to load node passwords", { description: error.message });
-      return;
-    }
-
-    setNodes((data ?? []) as Node[]);
+  React.useEffect(() => {
+    if (isAdmin) dataClient.listNodes().then(setNodes).catch((e) => toast.error((e as Error).message));
   }, [isAdmin]);
 
-  React.useEffect(() => {
-    void loadNodes();
-  }, [loadNodes]);
-
-  async function setMaster(node: Node) {
+  async function setMaster(node: DesktopNode) {
     const v = pwd[node.id]?.trim() ?? "";
     const parsed = z.string().min(8).max(128).safeParse(v);
     if (!parsed.success) {
@@ -71,39 +47,11 @@ function SecurityPage() {
     }
 
     setBusy(node.id);
-    const { data, error } = await supabase.rpc("set_node_master_password", {
-      p_node_id: node.id,
-      p_password: parsed.data,
-    });
+    const hash = await hashPassword(parsed.data);
+    const { error } = await dataClient.setNodeMasterPassword(node.id, hash);
     setBusy(null);
-
-    const result = data?.[0];
-    if (error || !result?.success) {
-      toast.error("Failed to update master password", {
-        description: result?.error_code ?? error?.message ?? "unknown_error",
-      });
-      return;
-    }
-
-    toast.success(`Master password updated for ${node.name}`);
-    setPwd((p) => ({ ...p, [node.id]: "" }));
-    setConfirmPwd((p) => ({ ...p, [node.id]: "" }));
-
-    setNodes((prev) =>
-      prev.map((n) =>
-        n.id === node.id
-          ? {
-              ...n,
-              master_password_hash: "configured",
-              password_algo: result.password_algo,
-              password_updated_at: result.password_updated_at,
-              password_version: result.password_version ?? n.password_version,
-              failed_attempts: 0,
-              locked_until: null,
-            }
-          : n,
-      ),
-    );
+    if (error) toast.error(error);
+    else { toast.success(`Master password updated for ${node.name}`); setPwd((p) => ({ ...p, [node.id]: "" })); }
   }
 
   async function changeOwn() {
@@ -119,17 +67,10 @@ function SecurityPage() {
     }
 
     setSavingOwn(true);
-    const { error } = await supabase.auth.updateUser({ password: parsed.data });
+    const { error } = await dataClient.updatePassword(parsed.data);
     setSavingOwn(false);
-
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-
-    toast.success("Password updated");
-    setNewPwd("");
-    setConfirmOwnPwd("");
+    if (error) toast.error(error);
+    else { toast.success("Password updated"); setNewPwd(""); }
   }
 
   return (

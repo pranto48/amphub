@@ -1,7 +1,6 @@
 import * as React from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { z } from "zod";
-import { supabase } from "@/integrations/supabase/client";
+import { dataClient } from "@/lib/data";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -112,15 +111,10 @@ function FileExplorer() {
   const [authChecked, setAuthChecked] = React.useState(false);
 
   React.useEffect(() => {
-    supabase
-      .from("desktop_nodes")
-      .select("name")
-      .eq("id", id)
-      .maybeSingle()
-      .then(({ data }) => {
-        setNodeName(data?.name ?? "");
-        setLoading(false);
-      });
+    dataClient.getNode(id).then((n) => {
+      setNodeName(n?.name ?? "");
+      setLoading(false);
+    });
   }, [id]);
 
   React.useEffect(() => {

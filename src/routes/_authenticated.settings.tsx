@@ -1,6 +1,6 @@
 import * as React from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { supabase } from "@/integrations/supabase/client";
+import { dataClient } from "@/lib/data";
 import { useAuth } from "@/lib/auth-context";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -19,8 +19,8 @@ function SettingsPage() {
 
   React.useEffect(() => {
     if (!user) return;
-    supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle().then(({ data }) => {
-      setDisplayName(data?.display_name ?? "");
+    dataClient.getProfile(user.id).then((p) => {
+      setDisplayName(p?.display_name ?? "");
       setLoading(false);
     });
   }, [user]);
@@ -28,9 +28,9 @@ function SettingsPage() {
   async function save() {
     if (!user) return;
     setSaving(true);
-    const { error } = await supabase.from("profiles").update({ display_name: displayName.trim() }).eq("id", user.id);
+    const { error } = await dataClient.updateProfile(user.id, displayName.trim());
     setSaving(false);
-    if (error) toast.error(error.message);
+    if (error) toast.error(error);
     else toast.success("Profile updated");
   }
 

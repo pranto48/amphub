@@ -1,126 +1,22 @@
 import * as React from "react";
-import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { toast } from "sonner";
-import {
-  Activity,
-  Ban,
-  BellRing,
-  Check,
-  Clock3,
-  Download,
-  Globe,
-  ListTodo,
-  Loader2,
-  RefreshCw,
-  ScrollText,
-  Settings2,
-  ShieldCheck,
-  UserCircle2,
-  X,
-} from "lucide-react";
-
-import { supabase } from "@/integrations/supabase/client";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { dataClient } from "@/lib/data";
+import type { AccessRequest, AuditEntry } from "@/lib/data/types";
 import { useAuth } from "@/lib/auth-context";
 import { RouteEmptyState, RouteLoadingState } from "@/components/route-state";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
+import { toast } from "sonner";
+import { Loader2, Check, X, ShieldAlert, Activity, ScrollText } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/admin")({ component: AdminPanel });
 
-type ReqStatus = "pending" | "approved" | "denied" | "revoked" | "expired";
-type Severity = "info" | "success" | "warning" | "error";
-type AuditFilter = "all" | "auth" | "approval" | "file_ops" | "remote_control";
-
-type ReqRow = {
-  id: string;
-  node_id: string;
-  requester_id: string;
-  requester_identity: string | null;
-  node_name: string | null;
-  location_hint: string | null;
-  status: ReqStatus;
-  requested_at: string;
-  expires_at: string | null;
-};
-
-type ActiveSession = {
-  id: string;
-  node_id: string;
-  requester_id: string | null;
-  started_at: string;
-  last_seen_at: string;
-};
-
-type Audit = {
-  id: string;
-  action: string;
-  event_type: string | null;
-  target: string | null;
-  actor_id: string | null;
-  metadata: Record<string, unknown> | null;
-  created_at: string;
-};
-
-type NotificationItem = {
-  id: string;
-  title: string;
-  description: string;
-  severity: Severity;
-  createdAt: string;
-};
-
-type RequesterInfo = {
-  email: string | null;
-  role: "admin" | "user" | "unknown";
-};
-
-type PolicySettings = {
-  auto_deny_outside_business_hours: boolean;
-  business_hours_start: string;
-  business_hours_end: string;
-  require_two_step_sensitive_nodes: boolean;
-  sensitive_node_ids_csv: string;
-  max_session_user_minutes: number;
-  max_session_admin_minutes: number;
-};
-
-const DEFAULT_POLICY: PolicySettings = {
-  auto_deny_outside_business_hours: false,
-  business_hours_start: "08:00",
-  business_hours_end: "18:00",
-  require_two_step_sensitive_nodes: false,
-  sensitive_node_ids_csv: "",
-  max_session_user_minutes: 30,
-  max_session_admin_minutes: 120,
-};
-
-function stringifyExport(format: "csv" | "json", rows: Audit[]) {
-  if (format === "json") return JSON.stringify(rows, null, 2);
-
-  const headers = ["timestamp", "action", "event_type", "target", "actor_id", "session_id", "request_id", "reason"];
-  const csvRows = rows.map((r) => {
-    const sessionId = typeof r.metadata?.session_id === "string" ? r.metadata.session_id : "";
-    const requestId = typeof r.metadata?.request_id === "string" ? r.metadata.request_id : "";
-    const reason = typeof r.metadata?.reason === "string" ? r.metadata.reason : "";
-    const row = [r.created_at, r.action, r.event_type ?? "", r.target ?? "", r.actor_id ?? "", sessionId, requestId, reason];
-    return row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",");
-  });
-
-  return `${headers.join(",")}\n${csvRows.join("\n")}`;
-}
-
 function AdminPanel() {
-  const { isAdmin, user } = useAuth();
+  const { isAdmin } = useAuth();
   const navigate = useNavigate();
-
-  const [pending, setPending] = React.useState<ReqRow[]>([]);
-  const [approved, setApproved] = React.useState<ReqRow[]>([]);
-  const [sessions, setSessions] = React.useState<ActiveSession[]>([]);
-  const [audit, setAudit] = React.useState<Audit[]>([]);
+  const [pending, setPending] = React.useState<AccessRequest[]>([]);
+  const [audit, setAudit] = React.useState<AuditEntry[]>([]);
   const [nodeMap, setNodeMap] = React.useState<Record<string, string>>({});
   const [requesterMap, setRequesterMap] = React.useState<Record<string, RequesterInfo>>({});
 
@@ -191,199 +87,41 @@ function AdminPanel() {
   }, [notify]);
 
   const load = React.useCallback(async () => {
-    setLoading(true);
-
-    const auditQuery = supabase
-      .from("audit_log")
-      .select("id,action,event_type,target,actor_id,metadata,created_at")
-      .order("created_at", { ascending: false })
-      .limit(250);
-
-    const [{ data: reqs }, { data: nodes }, { data: a }, { data: s }] = await Promise.all([
-      supabase
-        .from("access_requests")
-        .select("id,node_id,requester_id,requester_identity,node_name,location_hint,status,requested_at,expires_at")
-        .in("status", ["pending", "approved"])
-        .order("requested_at", { ascending: false }),
-      supabase.from("desktop_nodes").select("id,name"),
-      auditFilter === "all" ? auditQuery : auditQuery.eq("event_type", auditFilter),
-      supabase
-        .from("active_sessions")
-        .select("id,node_id,requester_id,started_at,last_seen_at")
-        .is("ended_at", null)
-        .is("terminated_at", null)
-        .order("started_at", { ascending: false }),
-    ]);
-
-    const allRequests = (reqs ?? []) as ReqRow[];
-    const allSessions = (s ?? []) as ActiveSession[];
-
-    const requesterIds = Array.from(new Set([
-      ...allRequests.map((r) => r.requester_id),
-      ...(allSessions.map((session) => session.requester_id).filter(Boolean) as string[]),
-    ]));
-
-    const [{ data: profiles }, { data: roles }] = await Promise.all([
-      requesterIds.length
-        ? supabase.from("profiles").select("id,email").in("id", requesterIds)
-        : Promise.resolve({ data: [] as { id: string; email: string | null }[] }),
-      requesterIds.length
-        ? supabase.from("user_roles").select("user_id,role").in("user_id", requesterIds)
-        : Promise.resolve({ data: [] as { user_id: string; role: "admin" | "user" }[] }),
-    ]);
-
-    const roleLookup = new Map((roles ?? []).map((r) => [r.user_id, r.role]));
-    const requesterLookup = Object.fromEntries(
-      (profiles ?? []).map((p) => [p.id, { email: p.email, role: roleLookup.get(p.id) ?? "unknown" } satisfies RequesterInfo]),
-    );
-
-    setPending(allRequests.filter((r) => r.status === "pending"));
-    setApproved(allRequests.filter((r) => r.status === "approved"));
-    setNodeMap(Object.fromEntries((nodes ?? []).map((n: { id: string; name: string }) => [n.id, n.name])));
-    setAudit((a ?? []) as Audit[]);
-    setSessions(allSessions);
-    setRequesterMap(requesterLookup);
+    try {
+      const [reqs, nodes, a] = await Promise.all([
+        dataClient.listPendingRequests(),
+        dataClient.listNodes(),
+        dataClient.listAudit(20),
+      ]);
+      setPending(reqs);
+      setNodeMap(Object.fromEntries(nodes.map((n) => [n.id, n.name])));
+      setAudit(a);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
     setLoading(false);
   }, [auditFilter]);
 
   React.useEffect(() => {
     if (!isAdmin) return;
-    void Promise.all([load(), loadPolicy()]);
-  }, [isAdmin, load, loadPolicy]);
-
-  async function decide(r: ReqRow, status: Extract<ReqStatus, "approved" | "denied" | "revoked">, mode: "once" | "timed" = "once") {
-    if (!user) return;
-    setDecisionBusyId(r.id);
-    const expiresAt = status !== "approved" ? null : mode === "timed" ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : null;
-
-    const { error } = await supabase
-      .from("access_requests")
-      .update({
-        status,
-        expires_at: expiresAt,
-        decided_at: new Date().toISOString(),
-        decided_by: user.id,
-      })
-      .eq("id", r.id);
-
-    setDecisionBusyId(null);
-    if (error) {
-      notify("error", "Decision failed", error.message);
-      return;
-    }
-
-    notify("success", "Request updated", `${status.toUpperCase()} saved for ${r.node_name ?? r.node_id.slice(0, 8)}.`);
-    await load();
-  }
-
-  async function terminateSession(session: ActiveSession) {
-    if (!user) return;
-    setSessionBusyId(session.id);
-    const { error } = await supabase
-      .from("active_sessions")
-      .update({
-        terminated_at: new Date().toISOString(),
-        terminated_by: user.id,
-        termination_reason: "admin_forced_terminate",
-      })
-      .eq("id", session.id)
-      .is("ended_at", null)
-      .is("terminated_at", null);
-
-    setSessionBusyId(null);
-    if (error) {
-      notify("error", "Terminate failed", error.message);
-      return;
-    }
-
-    notify("warning", "Session terminated", `Session ${session.id.slice(0, 8)} was terminated.`);
-    await load();
-  }
-
-  async function savePolicy() {
-    if (!user) return;
-    setPolicySaving(true);
-
-    const payload = {
-      auto_deny_outside_business_hours: policy.auto_deny_outside_business_hours,
-      business_hours_start: policy.business_hours_start,
-      business_hours_end: policy.business_hours_end,
-      require_two_step_sensitive_nodes: policy.require_two_step_sensitive_nodes,
-      sensitive_node_ids: policy.sensitive_node_ids_csv
-        .split(",")
-        .map((v) => v.trim())
-        .filter(Boolean),
-      max_session_duration_by_role: {
-        user: Number(policy.max_session_user_minutes),
-        admin: Number(policy.max_session_admin_minutes),
-      },
-      updated_by: user.id,
-    };
-
-    const q = policyId
-      ? supabase.from("admin_access_policies").update(payload).eq("id", policyId).select("id").single()
-      : supabase.from("admin_access_policies").insert(payload).select("id").single();
-
-    const { data, error } = await q;
-    setPolicySaving(false);
-
-    if (error) {
-      notify("error", "Policy save failed", error.message);
-      return;
-    }
-
-    if (data?.id) setPolicyId(data.id);
-    notify("success", "Policy updated", "Admin access policy settings were saved.");
-  }
-
-  async function refreshAll() {
-    setRefreshing(true);
-    await Promise.all([load(), loadPolicy()]);
-    setRefreshing(false);
-  }
-
-  async function exportIncident(format: "csv" | "json") {
-    setExporting(format);
-    const { data, error } = await supabase.rpc("export_incident_review", {
-      p_format: format,
-      p_event_type: auditFilter === "all" ? null : auditFilter,
+    const unsub = dataClient.subscribe((evt) => {
+      if (evt.table !== "access_requests") return;
+      if (evt.type === "INSERT") {
+        toast.warning("New access request", { description: "Requester awaiting approval" });
+        setPending((p) => [evt.row, ...p.filter((r) => r.id !== evt.row.id)]);
+      } else if (evt.type === "UPDATE") {
+        load();
+      }
     });
+    return () => unsub();
+  }, [isAdmin, load]);
 
-    setExporting(null);
-    if (error || !data) {
-      notify("error", "Export failed", error?.message ?? "No data returned");
-      return;
-    }
-
-    const mime = format === "csv" ? "text/csv;charset=utf-8" : "application/json;charset=utf-8";
-    const blob = new Blob([data], { type: mime });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `incident-review-${new Date().toISOString().replaceAll(":", "-")}.${format}`;
-    link.click();
-    URL.revokeObjectURL(link.href);
-
-    notify("success", "Incident export ready", `Downloaded ${format.toUpperCase()} incident review file.`);
-  }
-
-  function exportAuditReport(format: "csv" | "json") {
-    setAuditExporting(format);
-
-    const reportRows = audit.filter((a) =>
-      a.action.includes("approve") || a.action.includes("deny") || a.action.includes("revoke") || a.action.includes("terminate"),
-    );
-
-    const payload = stringifyExport(format, reportRows);
-    const mime = format === "csv" ? "text/csv;charset=utf-8" : "application/json;charset=utf-8";
-    const blob = new Blob([payload], { type: mime });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `audit-approval-report-${new Date().toISOString().replaceAll(":", "-")}.${format}`;
-    link.click();
-    URL.revokeObjectURL(link.href);
-    setAuditExporting(null);
-
-    notify("success", "Audit report exported", `Downloaded ${reportRows.length} ${format.toUpperCase()} records.`);
+  async function decide(req: AccessRequest, approve: boolean) {
+    const { error } = await dataClient.decideAccessRequest(req.id, approve);
+    if (error) { toast.error(error); return; }
+    toast.success(approve ? "Approved" : "Denied");
+    setPending((p) => p.filter((r) => r.id !== req.id));
+    load();
   }
 
   if (!isAdmin) return null;

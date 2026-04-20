@@ -1,146 +1,44 @@
 services:
-  app:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: remoteops
+      POSTGRES_PASSWORD: remoteops
+      POSTGRES_DB: remoteops
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./server/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U remoteops -d remoteops"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ./server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://remoteops:remoteops@db:5432/remoteops
+      JWT_SECRET: ${JWT_SECRET:-please-change-me}
+      CORS_ORIGIN: "*"
+      PORT: "4000"
+    expose:
+      - "4000"
+
+  web:
     build:
       context: .
       dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
     ports:
-      - "4455:4455"
-    environment:
-      NODE_ENV: production
-      PORT: 4455
-      VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-http://kong:8000}
-      VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzAwMDAwMDAwLCJleHAiOjIwMTU1NTU1NTV9.Q0TRJ8RlkAKoDKAHYGhN9bJKB0YG39IoQm87Zl2V5P8}
-      SUPABASE_URL: ${SUPABASE_URL:-http://kong:8000}
-      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzAwMDAwMDAwLCJleHAiOjIwMTU1NTU1NTV9.Q0TRJ8RlkAKoDKAHYGhN9bJKB0YG39IoQm87Zl2V5P8}
-      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UiLCJpYXQiOjE3MDAwMDAwMDAsImV4cCI6MjAxNTU1NTU1NX0.VzVVZ2xWnVTBbe_FIUdA6aHhW0KH4Yj0hKC_0M5hEWs}
-    depends_on:
-      kong:
-        condition: service_healthy
-      db:
-        condition: service_healthy
-
-  db:
-    image: postgres:16-alpine
-    container_name: remoteops-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: postgres
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-    command:
-      - postgres
-      - -c
-      - wal_level=logical
-      - -c
-      - max_replication_slots=10
-      - -c
-      - max_wal_senders=10
-    ports:
-      - "5433:5432"
-    volumes:
-      - remoteops-db-data:/var/lib/postgresql/data
-      - ./docker/postgres/init:/docker-entrypoint-initdb.d
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
-  auth:
-    image: supabase/gotrue:latest
-    restart: unless-stopped
-    environment:
-      GOTRUE_API_HOST: 0.0.0.0
-      GOTRUE_API_PORT: 9999
-      GOTRUE_SITE_URL: http://localhost:4455
-      GOTRUE_URI_ALLOW_LIST: http://localhost:4455
-      API_EXTERNAL_URL: http://localhost:8000
-      GOTRUE_DB_DRIVER: postgres
-      GOTRUE_DB_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/postgres?search_path=auth
-      GOTRUE_JWT_SECRET: ${SUPABASE_JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
-      GOTRUE_JWT_AUD: authenticated
-      GOTRUE_JWT_ADMIN_ROLES: service_role
-      GOTRUE_DISABLE_SIGNUP: "false"
-    depends_on:
-      db:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:9999/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 15
-
-  rest:
-    image: postgrest/postgrest:latest
-    restart: unless-stopped
-    environment:
-      PGRST_DB_URI: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/postgres
-      PGRST_DB_SCHEMAS: public,storage,graphql_public
-      PGRST_DB_ANON_ROLE: anon
-      PGRST_JWT_SECRET: ${SUPABASE_JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
-      PGRST_APP_SETTINGS_JWT_SECRET: ${SUPABASE_JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
-      PGRST_DB_USE_LEGACY_GUCS: "false"
-    depends_on:
-      db:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/"]
-      interval: 10s
-      timeout: 5s
-      retries: 15
-
-  realtime:
-    image: supabase/realtime:latest
-    restart: unless-stopped
-    environment:
-      PORT: 4000
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_USER: postgres
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      DB_NAME: postgres
-      DB_AFTER_CONNECT_QUERY: SET search_path TO _realtime
-      DB_ENC_KEY: supabaserealtime
-      API_JWT_SECRET: ${SUPABASE_JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
-      SECRET_KEY_BASE: some-secret-key-base-with-at-least-64-characters-long-and-secure
-      APP_NAME: realtime
-      ERL_AFLAGS: -proto_dist inet_tcp
-      DNS_NODES: "''"
-      SEED_SELF_HOST: "true"
-    depends_on:
-      db:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:4000/api/tenants/realtime/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 15
-
-  kong:
-    image: kong:2.8.1
-    restart: unless-stopped
-    environment:
-      KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /home/kong/kong.yml
-      KONG_DNS_ORDER: LAST,A,CNAME
-      KONG_PLUGINS: request-transformer,cors,key-auth,acl
-    volumes:
-      - ./docker/kong/kong.yml:/home/kong/kong.yml:ro
-    ports:
-      - "8000:8000"
-      - "8443:8443"
-    depends_on:
-      auth:
-        condition: service_healthy
-      rest:
-        condition: service_healthy
-      realtime:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "kong", "health"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
+      - "8080:80"
 
 volumes:
-  remoteops-db-data:
+  db_data:

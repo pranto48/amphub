@@ -1,7 +1,6 @@
 import * as React from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { z } from "zod";
-import { supabase } from "@/integrations/supabase/client";
+import { dataClient } from "@/lib/data";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Power, Maximize2, Keyboard, Loader2, CircleDashed, WifiOff } from "lucide-react";
@@ -52,16 +51,10 @@ function RemoteSession() {
   const adapterRef = React.useRef<RemoteStreamAdapter | null>(null);
 
   React.useEffect(() => {
-    supabase
-      .from("desktop_nodes")
-      .select("name,status")
-      .eq("id", id)
-      .maybeSingle()
-      .then(({ data }) => {
-        setName(data?.name ?? "node");
-        if (data?.status !== "online") setViewerState("agent-offline");
-        setLoading(false);
-      });
+    dataClient.getNode(id).then((n) => {
+      setName(n?.name ?? "node");
+      setLoading(false);
+    });
   }, [id]);
 
   React.useEffect(() => {
