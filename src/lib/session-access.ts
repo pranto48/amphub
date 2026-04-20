@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 
 type AccessCheckArgs = {
+  // UX-only preflight. Server RPC guard is the primary security boundary.
   requestId?: string;
   nodeId: string;
   userId?: string;
@@ -8,6 +9,7 @@ type AccessCheckArgs = {
 };
 
 export async function canAccessApprovedSession(args: AccessCheckArgs): Promise<boolean> {
+  // Do not rely on this check for security decisions; every privileged action is re-validated in RPC.
   if (args.local) return true;
   if (!args.userId || !args.requestId) return false;
 
