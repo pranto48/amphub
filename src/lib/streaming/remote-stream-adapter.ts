@@ -6,9 +6,10 @@ export type ConnectionState =
   | "failed";
 
 export type StreamInputMessage =
-  | { type: "command"; command: "ctrl_alt_del" }
+  | { type: "command"; command: "ctrl_alt_del" | "disconnect" }
   | { type: "key"; key: string; pressed: boolean }
-  | { type: "pointer"; x: number; y: number; button?: number; pressed?: boolean };
+  | { type: "pointer"; x: number; y: number; button?: number; pressed?: boolean }
+  | { type: "wheel"; dx: number; dy: number };
 
 export interface StreamStats {
   latencyMs: number | null;
@@ -58,6 +59,10 @@ export abstract class BaseRemoteStreamAdapter implements RemoteStreamAdapter {
   protected markFrame() {
     this.stats.lastFrameAt = Date.now();
     this.onFrame?.();
+  }
+
+  protected setTelemetry(next: Partial<StreamStats>) {
+    this.stats = { ...this.stats, ...next };
   }
 
   getStats() {
