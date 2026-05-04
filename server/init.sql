@@ -63,7 +63,11 @@ CREATE TABLE IF NOT EXISTS audit_log (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- Seed admin user: admin@admin.com / password
+-- Optional bootstrap admin user: admin@admin.com / password
+-- Set BOOTSTRAP_DEFAULT_ADMIN=true only for first-time local/dev bootstrap.
+\getenv bootstrap_default_admin BOOTSTRAP_DEFAULT_ADMIN
+\if :{?bootstrap_default_admin}
+\if :bootstrap_default_admin = 'true'
 -- bcrypt hash of "password" (cost 10)
 INSERT INTO users (id, email, password_hash)
 VALUES ('00000000-0000-0000-0000-000000000001', 'admin@admin.com',
@@ -77,6 +81,8 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO user_roles (user_id, role)
 VALUES ('00000000-0000-0000-0000-000000000001', 'admin')
 ON CONFLICT DO NOTHING;
+\endif
+\endif
 
 -- Seed a few demo desktop nodes so the dashboard is populated
 INSERT INTO desktop_nodes (name, remote_id, local_ip, os, status, last_seen) VALUES
