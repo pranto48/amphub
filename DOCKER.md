@@ -23,6 +23,19 @@ Use this for all new installs.
 ```bash
 docker compose up --build -d
 ```
+### Mandatory production checklist (before first start)
+
+1. Generate and export a strong JWT secret (at least 64 hex chars):
+   ```bash
+   export JWT_SECRET="$(openssl rand -hex 64)"
+   ```
+2. Ensure bootstrap admin is disabled:
+   ```bash
+   export BOOTSTRAP_DEFAULT_ADMIN=false
+   ```
+3. Confirm you are not using demo credentials (`admin@admin.com` / `password`) anywhere.
+4. Start the stack only after variables are exported in your shell (or `.env` file used by Compose).
+
 
 ### Required environment variables
 
@@ -34,7 +47,7 @@ Example:
 JWT_SECRET="$(openssl rand -hex 64)" docker compose up --build -d
 ```
 
-If you do not set `JWT_SECRET`, compose uses the insecure default `please-change-me` from `docker-compose.yml`.
+If you do not set `JWT_SECRET`, startup will fail because `docker-compose.yml` requires an explicit value.
 
 ## Deployment Modes
 

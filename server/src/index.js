@@ -17,6 +17,31 @@ const {
 
 const pool = new pg.Pool({ connectionString: DATABASE_URL });
 
+function assertSecureRuntime() {
+  const nodeEnv = (process.env.NODE_ENV || "development").toLowerCase();
+  const insecureSecrets = new Set(["", "please-change-me", "change-me-in-production"]);
+  const insecureBootstrap = String(process.env.BOOTSTRAP_DEFAULT_ADMIN || "false").toLowerCase() === "true";
+  const insecure = [];
+
+  if (insecureSecrets.has(String(JWT_SECRET).trim())) {
+    insecure.push("JWT_SECRET is missing or set to an insecure default.");
+  }
+  if (insecureBootstrap) {
+    insecure.push("BOOTSTRAP_DEFAULT_ADMIN=true enables a known default admin credential.");
+  }
+
+  if (!insecure.length) return;
+
+  const message = `[SECURITY] Insecure runtime defaults detected: ${insecure.join(" ")}`;
+  if (nodeEnv === "production") {
+    console.error(message);
+    throw new Error("Refusing to start API in production with insecure defaults.");
+  }
+  console.warn(`${message} This is only acceptable for local development.`);
+}
+
+assertSecureRuntime();
+
 // Wait for Postgres to be ready (compose ordering is best-effort)
 async function waitForDb() {
   for (let i = 0; i < 30; i++) {

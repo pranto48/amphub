@@ -6,6 +6,7 @@ services:
       POSTGRES_USER: remoteops
       POSTGRES_PASSWORD: remoteops
       POSTGRES_DB: remoteops
+      BOOTSTRAP_DEFAULT_ADMIN: ${BOOTSTRAP_DEFAULT_ADMIN:-false}
     volumes:
       - db_data:/var/lib/postgresql/data
       - ./server/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -24,7 +25,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://remoteops:remoteops@db:5432/remoteops
-      JWT_SECRET: ${JWT_SECRET:-please-change-me}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       CORS_ORIGIN: "*"
       PORT: "4000"
     expose:
