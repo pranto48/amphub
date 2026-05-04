@@ -1,102 +1,84 @@
-# RemoteOps — Docker self-hosted deployment
+# RemoteOps — Docker Self-Hosted Deployment
 
-This repo can run in two modes:
+This repository’s canonical Docker deployment for new users is the **`db + api + web`** stack defined in `docker-compose.yml`.
 
-| Mode       | Backend                | When                         |
-|------------|------------------------|------------------------------|
-| `supabase` | Lovable Cloud (default)| In the Lovable preview       |
-| `rest`     | Express + Postgres + WS| Self-hosted via `docker compose` |
+## Canonical mode (recommended)
 
-The mode is controlled at **build time** by `VITE_BACKEND_MODE`. The Lovable
-preview keeps using Supabase. The Docker image is built with `rest`.
+Use this for all new installs.
 
-## Quick start (Docker)
+### Services
+
+- `db` — PostgreSQL 16 with schema/bootstrap from `server/init.sql`
+- `api` — Node/Express + WebSocket backend on internal port `4000`
+- `web` — Nginx serving the SPA and proxying `/api` + `/ws` to `api`
+
+### Exposed ports
+
+- `web`: `8080:80` (open app at `http://localhost:8080`)
+- `db`: no host port published (internal to compose network)
+- `api`: no host port published (internal to compose network, exposed to `web` as `4000`)
+
+### Startup command
 
 ```bash
-git clone <this-repo>
-cd <this-repo>
 docker compose up --build -d
 ```
 
-Then open **http://localhost:8080**.
+### Required environment variables
 
-Default admin account (created automatically by `server/init.sql`):
+- `JWT_SECRET` (**required for production**)
 
-- **Email:** `admin@admin.com`
-- **Password:** `password`
-
-> ⚠️ Change this immediately after first login from **Security → Change your password**.
-
-The compose stack starts three services:
-
-- `db`  — Postgres 16, schema and seed loaded from `server/init.sql`
-- `api` — Node/Express + WebSocket server on internal port 4000
-- `web` — Nginx serving the built SPA on host port **8080**, proxying `/api` and `/ws` to `api`
-
-### Configuration
-
-Set a strong JWT secret in production:
+Example:
 
 ```bash
-JWT_SECRET="$(openssl rand -hex 64)" docker compose up -d
+JWT_SECRET="$(openssl rand -hex 64)" docker compose up --build -d
 ```
 
-To reset the database (wipes all data and re-runs `init.sql`):
+If you do not set `JWT_SECRET`, compose uses the insecure default `please-change-me` from `docker-compose.yml`.
+
+## Deployment Modes
+
+### 1) Canonical app stack (recommended)
+
+- **Compose file(s):** `docker-compose.yml`
+- **Command:**
+
+```bash
+docker compose -f docker-compose.yml up --build -d
+```
+
+### 2) Legacy Supabase image-tag pinning override (only for old custom stacks)
+
+This repo also includes a compatibility override for older Supabase-heavy compose setups that are **not** the default deployment in this repository.
+
+- **Compose file(s):**
+  - your existing legacy compose file (must define `auth`, `rest`, `realtime`, `kong`)
+  - `docker-compose.supabase-pins.yml`
+- **Command:**
+
+```bash
+docker compose \
+  -f <your-legacy-compose-file>.yml \
+  -f docker-compose.supabase-pins.yml \
+  up --build -d
+```
+
+## If you are following old docs
+
+Older docs and examples in this project referred to a Supabase gateway + app setup with different ports/files.
+
+- **Old app URL/port:** `http://localhost:4455`
+- **New app URL/port:** `http://localhost:8080`
+- **Old gateway URL/port:** `http://localhost:8000` (Kong/Supabase gateway)
+- **New default:** no Kong gateway in the canonical stack
+- **Old file assumptions:** a compose file including `app`, `kong`, `auth`, `rest`, `realtime`
+- **New canonical file:** `docker-compose.yml` with `db`, `api`, `web`
+
+## Reset database
+
+To wipe all data and re-run `server/init.sql`:
 
 ```bash
 docker compose down -v
 docker compose up --build -d
 ```
-
-### Architecture
-
-```
- ┌────────┐    /api/*    ┌─────┐      ┌────┐
- │ Nginx  │ ───────────► │ API │ ───► │ DB │
- │ (web)  │    /ws       └─────┘      └────┘
- └────────┘ ───────────► (WebSocket)
-       ▲
-       │ static SPA
-       │
-   user browser
-```
-
-### Endpoints (server)
-
-| Method | Path                                  | Description                           |
-|--------|---------------------------------------|---------------------------------------|
-| POST   | `/api/auth/signup`                    | Create user (default role `user`)     |
-| POST   | `/api/auth/login`                     | Returns JWT                           |
-| GET    | `/api/auth/me`                        | Current user                          |
-| GET    | `/api/auth/role`                      | `{ isAdmin }`                         |
-| POST   | `/api/auth/password`                  | Update own password                   |
-| GET    | `/api/profiles/:id`                   | Read profile                          |
-| PATCH  | `/api/profiles/:id`                   | Update display name (own only)        |
-| GET    | `/api/nodes`                          | List desktop nodes                    |
-| GET    | `/api/nodes/:id`                      | Single node                           |
-| POST   | `/api/nodes/:id/master-password`      | Admin: set master password hash       |
-| GET    | `/api/access-requests?status=pending` | Admin: pending requests               |
-| POST   | `/api/access-requests`                | Create access request                 |
-| GET    | `/api/access-requests/:id`            | Single request                        |
-| POST   | `/api/access-requests/:id/decision`   | Admin: `{ approve: true \| false }`   |
-| GET    | `/api/audit?limit=20`                 | Admin: audit log                      |
-| WS     | `/ws?token=<jwt>`                     | Realtime push                         |
-
-Realtime payloads:
-
-```json
-{ "table": "access_requests", "type": "INSERT" | "UPDATE", "row": { ... } }
-{ "table": "desktop_nodes",   "type": "INSERT" | "UPDATE" | "DELETE", "row": { ... } }
-```
-
-## Why your previous `docker compose` failed
-
-You tried to run a self-hosted Supabase stack which pulls `supabase/gotrue:latest`
-— that image tag does not exist (Supabase tags by version, not `latest`).
-This Compose file does not use Supabase images at all; the Postgres + Express
-backend is fully self-contained.
-
-## Streaming
-
-The remote desktop viewer is still a placeholder. See `STREAMING.md` for paths
-to plug in a real RDP/VNC/WebRTC agent.
