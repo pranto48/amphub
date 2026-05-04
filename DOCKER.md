@@ -82,3 +82,25 @@ To wipe all data and re-run `server/init.sql`:
 docker compose down -v
 docker compose up --build -d
 ```
+
+## Troubleshooting startup/readiness
+
+- The stack uses health-gated startup ordering:
+  - `db` must report healthy before `api` starts.
+  - `api` must report healthy before `web` starts.
+- `api` health is checked via `http://127.0.0.1:4000/api/health` inside the `api` container.
+- This reduces early boot races where `web` comes up before backend readiness.
+
+Useful checks:
+
+```bash
+docker compose ps
+docker compose logs -f db api web
+```
+
+If `api` is repeatedly unhealthy, verify database reachability and environment:
+
+```bash
+docker compose exec api sh -lc 'echo "$DATABASE_URL"'
+docker compose exec api sh -lc 'wget -qO- http://127.0.0.1:4000/api/health && echo'
+```
