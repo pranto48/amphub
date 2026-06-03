@@ -114,10 +114,12 @@ function stringifyExport(format: "csv" | "json", rows: Audit[]) {
 }
 
 function AdminPanel() {
-  const { isAdmin } = useAuth();
+  const { user, isAdmin } = useAuth();
   const navigate = useNavigate();
-  const [pending, setPending] = React.useState<AccessRequest[]>([]);
-  const [audit, setAudit] = React.useState<AuditEntry[]>([]);
+  const [pending, setPending] = React.useState<ReqRow[]>([]);
+  const [approved, setApproved] = React.useState<ReqRow[]>([]);
+  const [audit, setAudit] = React.useState<Audit[]>([]);
+  const [sessions, setSessions] = React.useState<ActiveSession[]>([]);
   const [nodeMap, setNodeMap] = React.useState<Record<string, string>>({});
   const [requesterMap, setRequesterMap] = React.useState<Record<string, RequesterInfo>>({});
 
@@ -343,7 +345,7 @@ function AdminPanel() {
     setExporting(format);
     const { data, error } = await supabase.rpc("export_incident_review", {
       p_format: format,
-      p_event_type: auditFilter === "all" ? null : auditFilter,
+      p_event_type: auditFilter === "all" ? undefined : auditFilter,
     });
     if (error) {
       notify("error", "Export failed", error.message);

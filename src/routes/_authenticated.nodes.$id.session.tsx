@@ -1,5 +1,7 @@
 import * as React from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { z } from "zod";
+import { supabase } from "@/integrations/supabase/client";
 import { dataClient } from "@/lib/data";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -100,7 +102,7 @@ function RemoteSession() {
       .select("session_token")
       .eq("id", search.requestId)
       .maybeSingle()
-      .then(({ data }) => setSessionToken(data?.session_token ?? undefined));
+      .then((res: any) => setSessionToken(res.data?.session_token ?? undefined));
   }, [search.requestId, search.local]);
 
   React.useEffect(() => {
@@ -234,11 +236,11 @@ function RemoteSession() {
     await supabase.rpc("record_privileged_event", {
       p_node_id: id,
       p_action: "session_ctrl_alt_del",
-      p_request_id: search.requestId ?? null,
-      p_requester_id: user?.id ?? null,
-      p_session_token: sessionToken ?? null,
+      p_request_id: search.requestId ?? undefined,
+      p_requester_id: user?.id ?? undefined,
+      p_session_token: sessionToken ?? undefined,
       p_local: search.local ?? false,
-      p_metadata: { node_name: name, command: "ctrl_alt_del", stream_state: viewerState },
+      p_metadata: { node_name: name, command: "ctrl_alt_del", stream_state: viewerState } as any,
     });
 
     toast.info("Ctrl+Alt+Del sent", { description: "Delivered via authenticated control channel" });
@@ -251,11 +253,11 @@ function RemoteSession() {
     await supabase.rpc("record_privileged_event", {
       p_node_id: id,
       p_action: "session_end",
-      p_request_id: search.requestId ?? null,
-      p_requester_id: user?.id ?? null,
-      p_session_token: sessionToken ?? null,
+      p_request_id: search.requestId ?? undefined,
+      p_requester_id: user?.id ?? undefined,
+      p_session_token: sessionToken ?? undefined,
       p_local: search.local ?? false,
-      p_metadata: { node_name: name, source: "disconnect", connection_state: connectionState },
+      p_metadata: { node_name: name, source: "disconnect", connection_state: connectionState } as any,
     });
 
     toast.success("Session ended");

@@ -122,22 +122,23 @@ abstract class SignaledBridgeAdapter extends BaseRemoteStreamAdapter {
     this.setState("connecting");
 
     try {
-      this.negotiated = await this.signaling.negotiate({
+      const negotiated = await this.signaling.negotiate({
         nodeId: options.nodeId,
         requestId: options.requestId,
         sessionToken: options.sessionToken,
         local: options.local,
       });
+      this.negotiated = negotiated;
 
-      await this.signaling.joinControlChannel(this.negotiated.signalingRoom, {
+      await this.signaling.joinControlChannel(negotiated.signalingRoom, {
         onControlMessage: (message) => this.onControlMessage(message),
         onStateChange: (next) => this.onControlState(next),
         onTelemetry: (stats) => this.setTelemetry(stats),
       });
 
       await this.signaling.announceHello({
-        sessionId: this.negotiated.sessionId,
-        requestId: options.requestId ?? this.negotiated.sessionId,
+        sessionId: negotiated.sessionId,
+        requestId: options.requestId ?? negotiated.sessionId,
         capabilities: {
           adapters: ["webrtc", "rdp", "vnc"],
           controlChannel: "supabase-realtime",
@@ -147,7 +148,7 @@ abstract class SignaledBridgeAdapter extends BaseRemoteStreamAdapter {
         },
       });
 
-      this.setState(this.negotiated.viewerState === "agent-offline" ? "failed" : "connected");
+      this.setState(negotiated.viewerState === "agent-offline" ? "failed" : "connected");
     } catch {
       this.setState("failed");
     }

@@ -29,8 +29,8 @@ export class SupabaseSessionSignaling {
 
     const { data, error } = await supabase.rpc("session_stream_negotiate", {
       p_node_id: args.nodeId,
-      p_request_id: args.requestId ?? null,
-      p_session_token: args.sessionToken ?? null,
+      p_request_id: args.requestId ?? undefined,
+      p_session_token: args.sessionToken ?? undefined,
     });
 
     if (error) throw new Error(error.message);
@@ -38,12 +38,12 @@ export class SupabaseSessionSignaling {
     if (!row?.authorized) throw new Error(row?.denial_reason ?? "session_not_authorized");
 
     return {
-      sessionId: row.session_id,
-      signalingRoom: row.signaling_room,
-      controlToken: row.control_token,
-      mediaEndpoint: row.media_endpoint,
-      preferredAdapter: row.preferred_adapter,
-      viewerState: row.viewer_state,
+      sessionId: row.session_id!,
+      signalingRoom: row.signaling_room!,
+      controlToken: row.control_token!,
+      mediaEndpoint: row.media_endpoint!,
+      preferredAdapter: row.preferred_adapter as any,
+      viewerState: row.viewer_state as any,
     } satisfies NegotiatedSession;
   }
 
@@ -114,9 +114,9 @@ export class SupabaseSessionSignaling {
     await supabase.rpc("session_stream_heartbeat", {
       p_node_id: args.nodeId,
       p_session_id: args.sessionId,
-      p_request_id: args.requestId ?? null,
-      p_latency_ms: args.latencyMs ?? null,
-      p_fps: args.fps ?? null,
+      p_request_id: args.requestId ?? undefined,
+      p_latency_ms: args.latencyMs ?? undefined,
+      p_fps: args.fps ?? undefined,
     });
   }
 

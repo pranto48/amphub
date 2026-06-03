@@ -12,18 +12,27 @@ export type DesktopNode = {
   last_seen: string | null;
   master_password_hash?: string | null;
   owner_id?: string | null;
+  password_algo?: string | null;
+  password_version?: number | null;
+  password_updated_at?: string | null;
+  failed_attempts?: number | null;
+  locked_until?: string | null;
 };
 
 export type AccessRequest = {
   id: string;
   node_id: string;
   requester_id: string;
-  status: "pending" | "approved" | "denied" | "expired";
+  status: "pending" | "approved" | "denied" | "expired" | "revoked";
   requested_at: string;
   decided_at: string | null;
   decided_by: string | null;
   session_token: string | null;
   expires_at: string | null;
+  request_reason?: string | null;
+  pending_expires_at?: string | null;
+  status_reason_code?: string | null;
+  status_reason_message?: string | null;
 };
 
 export type AuditEntry = {

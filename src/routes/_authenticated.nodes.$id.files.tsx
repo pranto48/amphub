@@ -1,5 +1,7 @@
 import * as React from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { z } from "zod";
+import { supabase } from "@/integrations/supabase/client";
 import { dataClient } from "@/lib/data";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -109,6 +111,8 @@ function FileExplorer() {
   const [loading, setLoading] = React.useState(true);
   const [authorized, setAuthorized] = React.useState(false);
   const [authChecked, setAuthChecked] = React.useState(false);
+  const [activeOp, setActiveOp] = React.useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
     dataClient.getNode(id).then((n) => {
@@ -167,11 +171,11 @@ function FileExplorer() {
     const { data } = await supabase.rpc("record_privileged_event", {
       p_node_id: id,
       p_action: action,
-      p_request_id: search.requestId ?? null,
-      p_requester_id: user?.id ?? null,
-      p_session_token: search.sessionToken ?? null,
+      p_request_id: search.requestId ?? undefined,
+      p_requester_id: user?.id ?? undefined,
+      p_session_token: search.sessionToken ?? undefined,
       p_local: search.local ?? false,
-      p_metadata: metadata,
+      p_metadata: metadata as any,
     });
     return data?.[0] ?? { authorized: false, denial_reason: "request_not_approved" };
   }
