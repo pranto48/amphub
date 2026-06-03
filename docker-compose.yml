@@ -46,7 +46,7 @@ services:
       api:
         condition: service_healthy
     ports:
-      - "8080:80"
+      - "6622:80"
 
 volumes:
   db_data:
