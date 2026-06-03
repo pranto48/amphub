@@ -298,7 +298,8 @@ function Dashboard() {
                 )}
               </div>
             </Card>
-          ))}
+          );
+        })}
         </div>
       )}
     </div>

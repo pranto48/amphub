@@ -345,16 +345,58 @@ function AdminPanel() {
       p_format: format,
       p_event_type: auditFilter === "all" ? null : auditFilter,
     });
-    return () => unsub();
-  }, [isAdmin, load]);
-
-  async function decide(req: AccessRequest, approve: boolean) {
-    const { error } = await dataClient.decideAccessRequest(req.id, approve);
-    if (error) { toast.error(error); return; }
-    toast.success(approve ? "Approved" : "Denied");
-    setPending((p) => p.filter((r) => r.id !== req.id));
-    load();
+    if (error) {
+      notify("error", "Export failed", error.message);
+    } else if (data) {
+      const mime = format === "json" ? "application/json" : "text/csv";
+      const blob = new Blob([data as string], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `incident_export_${Date.now()}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+    setExporting(null);
   }
+
+  function exportAuditReport(format: "csv" | "json") {
+    setAuditExporting(format);
+    try {
+      const data = stringifyExport(format, audit);
+      const mime = format === "json" ? "application/json" : "text/csv";
+      const blob = new Blob([data], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `audit_report_${Date.now()}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      notify("error", "Export failed", (e as Error).message);
+    }
+    setAuditExporting(null);
+  }
+
+  React.useEffect(() => {
+    if (!isAdmin) return;
+    const channel = supabase
+      .channel("admin-changes")
+      .on("postgres_changes", { event: "*", schema: "public", table: "access_requests" }, () => {
+        void load();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "active_sessions" }, () => {
+        void load();
+      })
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [isAdmin, load]);
 
   if (!isAdmin) return null;
 
