@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { useAuth } from "@/lib/auth-context";
 import { supabase } from "@/integrations/supabase/client";
+import { backendMode } from "@/lib/data";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/signup")({ component: SignupPage });
@@ -37,14 +38,16 @@ function SignupPage() {
     setBusy(false);
     if (error) toast.error(error);
     else {
-      const { data: userData } = await supabase.auth.getUser();
-      if (userData.user?.id) {
-        void supabase.from("audit_log").insert({
-          actor_id: userData.user.id,
-          action: "auth_signup",
-          target: userData.user.id,
-          metadata: { email: parsed.data.email },
-        });
+      if (backendMode === "supabase") {
+        const { data: userData } = await supabase.auth.getUser();
+        if (userData.user?.id) {
+          void supabase.from("audit_log").insert({
+            actor_id: userData.user.id,
+            action: "auth_signup",
+            target: userData.user.id,
+            metadata: { email: parsed.data.email },
+          });
+        }
       }
       toast.success("Account created");
       navigate({ to: "/" });

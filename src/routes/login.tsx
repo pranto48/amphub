@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { useAuth } from "@/lib/auth-context";
 import { supabase } from "@/integrations/supabase/client";
+import { backendMode } from "@/lib/data";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/login")({ component: LoginPage });
@@ -38,36 +39,40 @@ function LoginPage() {
     if (!parsed.success) { toast.error(parsed.error.issues[0].message); return; }
     setBusy(true);
 
-    const throttle = await supabase.rpc("guard_auth_login_attempt", {
-      p_identifier: parsed.data.email,
-      p_client_fingerprint: loginFingerprint,
-    });
-    const throttleResult = throttle.data?.[0];
-    if (!throttleResult?.allowed) {
-      setBusy(false);
-      toast.error("Login temporarily blocked", {
-        description: throttleResult?.locked_until
-          ? `Too many failed attempts. Retry after ${new Date(throttleResult.locked_until).toLocaleTimeString()}.`
-          : throttleResult?.denial_reason ?? "rate_limited",
+    if (backendMode === "supabase") {
+      const throttle = await supabase.rpc("guard_auth_login_attempt", {
+        p_identifier: parsed.data.email,
+        p_client_fingerprint: loginFingerprint,
       });
-      return;
+      const throttleResult = throttle.data?.[0];
+      if (!throttleResult?.allowed) {
+        setBusy(false);
+        toast.error("Login temporarily blocked", {
+          description: throttleResult?.locked_until
+            ? `Too many failed attempts. Retry after ${new Date(throttleResult.locked_until).toLocaleTimeString()}.`
+            : throttleResult?.denial_reason ?? "rate_limited",
+        });
+        return;
+      }
     }
 
     const { error } = await signIn(parsed.data.email, parsed.data.password);
     setBusy(false);
     if (error) toast.error(error);
     else {
-      void supabase.rpc("mark_auth_login_success", {
-        p_identifier: parsed.data.email,
-        p_client_fingerprint: loginFingerprint,
-      });
-      const { data: userData } = await supabase.auth.getUser();
-      void supabase.from("audit_log").insert({
-        actor_id: userData.user?.id,
-        action: "auth_login",
-        target: userData.user?.id ?? null,
-        metadata: { email: parsed.data.email },
-      });
+      if (backendMode === "supabase") {
+        void supabase.rpc("mark_auth_login_success", {
+          p_identifier: parsed.data.email,
+          p_client_fingerprint: loginFingerprint,
+        });
+        const { data: userData } = await supabase.auth.getUser();
+        void supabase.from("audit_log").insert({
+          actor_id: userData.user?.id,
+          action: "auth_login",
+          target: userData.user?.id ?? null,
+          metadata: { email: parsed.data.email },
+        });
+      }
       toast.success("Authenticated");
       navigate({ to: "/" });
     }
