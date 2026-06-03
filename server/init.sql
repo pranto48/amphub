@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
 -- Set BOOTSTRAP_DEFAULT_ADMIN=true only for first-time local/dev bootstrap.
 \getenv bootstrap_default_admin BOOTSTRAP_DEFAULT_ADMIN
 \if :{?bootstrap_default_admin}
-\if :bootstrap_default_admin = 'true'
+\if :bootstrap_default_admin
 -- bcrypt hash of "password" (cost 10)
 INSERT INTO users (id, email, password_hash)
 VALUES ('00000000-0000-0000-0000-000000000001', 'admin@admin.com',
