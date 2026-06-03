@@ -23,6 +23,6 @@ FROM nginx:1.27-alpine
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 # TanStack Start outputs to .output/public for static assets in SPA mode,
 # but standard Vite builds emit to dist/. Copy whichever exists.
-COPY --from=build /app/dist /usr/share/nginx/html
+COPY --from=build /app/dist/client /usr/share/nginx/html
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
