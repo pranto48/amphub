@@ -592,6 +592,89 @@ function AdminPanel() {
       </Card>
 
       <Card className="p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <RefreshCw className={`size-4 text-primary ${checkingUpdates ? "animate-spin" : ""}`} />
+            <h2 className="text-sm font-semibold">System updates</h2>
+          </div>
+          {systemStatus?.update_available === "UPDATE_AVAILABLE" ? (
+            <Badge variant="destructive" className="animate-pulse bg-red-600 text-white font-semibold">
+              New Version Available!
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="bg-emerald-950/30 text-emerald-400 border-emerald-500/30">
+              Up to Date
+            </Badge>
+          )}
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-3 rounded-md border border-border p-3">
+            <div className="text-xs space-y-1.5">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Current Version:</span>
+                <span className="font-mono bg-muted px-1.5 py-0.5 rounded text-[11px]">
+                  {systemStatus?.current_commit ? systemStatus.current_commit.slice(0, 7) : "Checking..."}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Remote Version:</span>
+                <span className="font-mono bg-muted px-1.5 py-0.5 rounded text-[11px]">
+                  {systemStatus?.remote_commit ? systemStatus.remote_commit.slice(0, 7) : "Checking..."}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Last Checked:</span>
+                <span className="text-[11px] text-muted-foreground">
+                  {systemStatus?.last_checked ? new Date(systemStatus.last_checked).toLocaleString() : "Never"}
+                </span>
+              </div>
+            </div>
+
+            <div className="pt-2 flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void fetchSystemStatus(true)}
+                disabled={checkingUpdates}
+                className="w-full flex items-center justify-center gap-1.5"
+              >
+                {checkingUpdates ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+                Check for Updates
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-4 rounded-md border border-border p-3 flex flex-col justify-between">
+            <div className="flex items-center justify-between gap-2">
+              <div className="space-y-0.5">
+                <Label htmlFor="auto-update-toggle" className="text-sm font-medium">Auto-Update Mode</Label>
+                <p className="text-[11px] text-muted-foreground">Automatically check for updates and run self-updates daily.</p>
+              </div>
+              <Switch
+                id="auto-update-toggle"
+                checked={systemStatus?.auto_update_enabled ?? false}
+                onCheckedChange={(checked) => void toggleAutoUpdateMode(checked)}
+                aria-label="Toggle auto update mode"
+              />
+            </div>
+
+            <div className="pt-2">
+              <Button
+                size="sm"
+                variant={systemStatus?.update_available === "UPDATE_AVAILABLE" ? "default" : "secondary"}
+                onClick={() => setShowUpdateModal(true)}
+                className="w-full flex items-center justify-center gap-1.5"
+              >
+                <RefreshCw className="size-3.5" />
+                Update and Restart Amphub
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <Card className="p-4">
         <div className="mb-3 flex items-center gap-2">
           <BellRing className="size-4 text-warning" />
           <h2 className="text-sm font-semibold">Notification feed</h2>
@@ -755,6 +838,41 @@ function AdminPanel() {
           </div>
         )}
       </Card>
+
+      {showUpdateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-md rounded-lg border border-border bg-background p-6 shadow-lg animate-in zoom-in-95 duration-200">
+            <h3 className="text-lg font-semibold tracking-tight text-animated-accent mb-2">Confirm Update & Restart</h3>
+            <p className="text-sm text-muted-foreground leading-relaxed mb-6">
+              <span className="text-amber-500 font-semibold block mb-1">Warning:</span>
+              This will pull the latest Git changes from the repository, rebuild the Docker container, and restart the service. Remote access may briefly disconnect.
+            </p>
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setShowUpdateModal(false)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={() => void handleTriggerUpdate()}>
+                Confirm Update
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {triggeringUpdate && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="text-center space-y-4 max-w-sm px-4">
+            <Loader2 className="size-12 animate-spin text-primary mx-auto" />
+            <h3 className="text-xl font-bold tracking-tight">Triggering System Update...</h3>
+            <p className="text-sm text-muted-foreground">
+              Rebuilding the Docker container and restarting the service. Please wait while the system updates.
+            </p>
+            <div className="text-2xl font-mono font-semibold text-animated-accent">
+              Refreshing page in {updateCountdown}s
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
