@@ -559,7 +559,7 @@ try {
   console.error("Failed to read local git SHA:", err);
 }
 
-const sharedDir = "/app/update-shared";
+const sharedDir = process.env.NODE_ENV === "test" ? "./update-shared" : "/app/update-shared";
 const configFile = path.join(sharedDir, "config.json");
 let autoUpdateEnabled = false;
 
