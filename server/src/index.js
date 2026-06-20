@@ -559,9 +559,44 @@ try {
   console.error("Failed to read local git SHA:", err);
 }
 
+const sharedDir = "/app/update-shared";
+const configFile = path.join(sharedDir, "config.json");
+let autoUpdateEnabled = false;
+
+try {
+  if (fs.existsSync(configFile)) {
+    const cfg = JSON.parse(fs.readFileSync(configFile, "utf8"));
+    autoUpdateEnabled = !!cfg.autoUpdateEnabled;
+  }
+} catch (e) {
+  console.error("Failed to read update config file:", e);
+}
+
 let remoteSha = "unknown";
 let updateStatus = "UP_TO_DATE";
 let lastCheckedTimestamp = null;
+
+async function triggerUpdateAction(requestedBy) {
+  const timestamp = new Date().toISOString();
+  const secret = process.env.UPDATE_SHARED_SECRET || "change-me-in-production-update-secret";
+  const authSignature = crypto.createHmac("sha256", secret).update(timestamp).digest("hex");
+
+  const payload = {
+    status: "TRIGGERED",
+    requested_by: requestedBy,
+    timestamp: timestamp,
+    auth_signature: authSignature
+  };
+
+  const triggerPath = path.join(sharedDir, "trigger.json");
+
+  if (!fs.existsSync(sharedDir)) {
+    fs.mkdirSync(sharedDir, { recursive: true });
+  }
+  fs.writeFileSync(triggerPath, JSON.stringify(payload, null, 2), "utf8");
+  logSecurityEvent(null, "trigger_system_update", requestedBy, { timestamp, path: triggerPath });
+  return payload;
+}
 
 async function performUpdateCheck() {
   return new Promise((resolve) => {
@@ -578,7 +613,7 @@ async function performUpdateCheck() {
     const req = https.get(options, (res) => {
       let body = "";
       res.on("data", (chunk) => { body += chunk; });
-      res.on("end", () => {
+      res.on("end", async () => {
         lastCheckedTimestamp = new Date().toISOString();
         if (res.statusCode === 200) {
           try {
@@ -587,6 +622,14 @@ async function performUpdateCheck() {
               remoteSha = data.sha;
               if (localSha !== "unknown" && remoteSha !== "unknown" && localSha !== remoteSha) {
                 updateStatus = "UPDATE_AVAILABLE";
+                if (autoUpdateEnabled) {
+                  console.log("[AUTO-UPDATE] Update available. Auto-Update mode is enabled. Triggering system update...");
+                  try {
+                    await triggerUpdateAction("auto-updater");
+                  } catch (err) {
+                    console.error("Auto-update trigger failed:", err);
+                  }
+                }
               } else {
                 updateStatus = "UP_TO_DATE";
               }
@@ -632,32 +675,34 @@ app.get("/api/v1/system/status", authRequired, adminOnly, async (req, res) => {
     current_commit: localSha,
     remote_commit: remoteSha,
     update_available: updateStatus,
-    last_checked: lastCheckedTimestamp
+    last_checked: lastCheckedTimestamp,
+    auto_update_enabled: autoUpdateEnabled
   });
 });
 
-app.post("/api/v1/system/trigger-update", authRequired, adminOnly, async (req, res) => {
-  const timestamp = new Date().toISOString();
-  const secret = process.env.UPDATE_SHARED_SECRET || "change-me-in-production-update-secret";
-  const authSignature = crypto.createHmac("sha256", secret).update(timestamp).digest("hex");
-  const adminEmail = req.user.email || "admin";
-
-  const payload = {
-    status: "TRIGGERED",
-    requested_by: adminEmail,
-    timestamp: timestamp,
-    auth_signature: authSignature
-  };
-
-  const sharedDir = "/app/update-shared";
-  const triggerPath = path.join(sharedDir, "trigger.json");
-
+app.post("/api/v1/system/auto-update", authRequired, adminOnly, async (req, res) => {
+  const parsed = z.object({ enabled: z.boolean() }).safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0].message });
+  }
+  autoUpdateEnabled = parsed.data.enabled;
   try {
     if (!fs.existsSync(sharedDir)) {
       fs.mkdirSync(sharedDir, { recursive: true });
     }
-    fs.writeFileSync(triggerPath, JSON.stringify(payload, null, 2), "utf8");
-    logSecurityEvent(req.user.id, "trigger_system_update", adminEmail, { timestamp, path: triggerPath });
+    fs.writeFileSync(configFile, JSON.stringify({ autoUpdateEnabled }, null, 2), "utf8");
+    logSecurityEvent(req.user.id, "toggle_auto_update", req.user.email, { enabled: autoUpdateEnabled });
+    res.json({ success: true, autoUpdateEnabled });
+  } catch (err) {
+    console.error("Failed to save update config file:", err);
+    res.status(500).json({ error: "Failed to save update config file: " + err.message });
+  }
+});
+
+app.post("/api/v1/system/trigger-update", authRequired, adminOnly, async (req, res) => {
+  const adminEmail = req.user.email || "admin";
+  try {
+    const payload = await triggerUpdateAction(adminEmail);
     res.json({ message: "System update triggered successfully", payload });
   } catch (err) {
     console.error("Failed to write update trigger file:", err);

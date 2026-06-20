@@ -114,7 +114,7 @@ function stringifyExport(format: "csv" | "json", rows: Audit[]) {
 }
 
 function AdminPanel() {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, session } = useAuth();
   const navigate = useNavigate();
   const [pending, setPending] = React.useState<ReqRow[]>([]);
   const [approved, setApproved] = React.useState<ReqRow[]>([]);
@@ -137,6 +137,19 @@ function AdminPanel() {
   const [exporting, setExporting] = React.useState<"csv" | "json" | null>(null);
   const [auditExporting, setAuditExporting] = React.useState<"csv" | "json" | null>(null);
 
+  // System updates state
+  const [systemStatus, setSystemStatus] = React.useState<{
+    current_commit: string;
+    remote_commit: string;
+    update_available: "UPDATE_AVAILABLE" | "UP_TO_DATE";
+    last_checked: string | null;
+    auto_update_enabled: boolean;
+  } | null>(null);
+  const [checkingUpdates, setCheckingUpdates] = React.useState(false);
+  const [triggeringUpdate, setTriggeringUpdate] = React.useState(false);
+  const [showUpdateModal, setShowUpdateModal] = React.useState(false);
+  const [updateCountdown, setUpdateCountdown] = React.useState<number | null>(null);
+
   const notify = React.useCallback((severity: Severity, title: string, description: string) => {
     const item = {
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -153,9 +166,107 @@ function AdminPanel() {
     else toast.info(title, { description });
   }, []);
 
+  const API_BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") || "/api";
+
+  const fetchSystemStatus = React.useCallback(async (isManual = false) => {
+    if (isManual) setCheckingUpdates(true);
+    try {
+      const token = session?.access_token || localStorage.getItem("remoteops_token");
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      const res = await fetch(`${API_BASE}/v1/system/status`, { headers });
+      if (!res.ok) {
+        const errMsg = await res.text();
+        throw new Error(errMsg || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setSystemStatus(data);
+      if (isManual) {
+        notify("success", "Update check complete", data.update_available === "UPDATE_AVAILABLE" ? "New version is available!" : "System is up to date.");
+      }
+    } catch (err) {
+      console.error("Error fetching system status:", err);
+      if (isManual) {
+        notify("error", "Check failed", (err as Error).message);
+      }
+    } finally {
+      if (isManual) setCheckingUpdates(false);
+    }
+  }, [session, notify, API_BASE]);
+
+  const toggleAutoUpdateMode = async (enabled: boolean) => {
+    try {
+      const token = session?.access_token || localStorage.getItem("remoteops_token");
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      const res = await fetch(`${API_BASE}/v1/system/auto-update`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ enabled }),
+      });
+      if (!res.ok) {
+        const errMsg = await res.text();
+        throw new Error(errMsg || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setSystemStatus(prev => prev ? { ...prev, auto_update_enabled: data.autoUpdateEnabled } : null);
+      notify("success", "Auto-Update Settings Saved", `Automatic daily updates are now ${data.autoUpdateEnabled ? "enabled" : "disabled"}.`);
+    } catch (err) {
+      console.error("Failed to toggle auto update:", err);
+      notify("error", "Failed to update settings", (err as Error).message);
+    }
+  };
+
+  const handleTriggerUpdate = async () => {
+    setShowUpdateModal(false);
+    setTriggeringUpdate(true);
+    setUpdateCountdown(30);
+    try {
+      const token = session?.access_token || localStorage.getItem("remoteops_token");
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      const res = await fetch(`${API_BASE}/v1/system/trigger-update`, {
+        method: "POST",
+        headers,
+      });
+      if (!res.ok) {
+        const errMsg = await res.text();
+        throw new Error(errMsg || `HTTP ${res.status}`);
+      }
+      notify("success", "Update Triggered", "The system update has been scheduled and the service is rebuilding.");
+    } catch (err) {
+      console.error("Failed to trigger update:", err);
+      notify("error", "Update trigger failed", (err as Error).message);
+      setTriggeringUpdate(false);
+      setUpdateCountdown(null);
+    }
+  };
+
   React.useEffect(() => {
-    if (!isAdmin) navigate({ to: "/" });
-  }, [isAdmin, navigate]);
+    if (!isAdmin) {
+      navigate({ to: "/" });
+    } else {
+      fetchSystemStatus();
+    }
+  }, [isAdmin, navigate, fetchSystemStatus]);
+
+  React.useEffect(() => {
+    if (updateCountdown === null) return;
+    if (updateCountdown <= 0) {
+      window.location.reload();
+      return;
+    }
+    const timer = setTimeout(() => {
+      setUpdateCountdown(prev => prev !== null ? prev - 1 : null);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [updateCountdown]);
 
   const loadPolicy = React.useCallback(async () => {
     const { data, error } = await supabase
