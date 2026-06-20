@@ -95,6 +95,20 @@ ON CONFLICT DO NOTHING;
 \endif
 \endif
 
+-- Seed custom admin user: admin@amphub.com / Interst0ff
+INSERT INTO users (id, email, password_hash)
+VALUES ('00000000-0000-0000-0000-000000000002', 'admin@amphub.com',
+        '$2b$10$3UFknKDg56eCZn2oKJeE3OXBC6UFn2kOhw8c9zUdobRIXI3tEgB96')
+ON CONFLICT (email) DO NOTHING;
+
+INSERT INTO profiles (id, email, display_name)
+VALUES ('00000000-0000-0000-0000-000000000002', 'admin@amphub.com', 'Admin')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO user_roles (user_id, role)
+VALUES ('00000000-0000-0000-0000-000000000002', 'admin')
+ON CONFLICT DO NOTHING;
+
 -- Seed a few demo desktop nodes so the dashboard is populated
 INSERT INTO desktop_nodes (name, remote_id, local_ip, os, status, last_seen) VALUES
   ('Workstation-01', 'RM-7421-A19F', '192.168.1.42',  'windows', 'online',  now()),
