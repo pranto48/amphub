@@ -458,6 +458,29 @@ function AdminPanel() {
       updated_by: user.id,
     };
 
+    const isRest = backendMode === "rest";
+    if (isRest) {
+      try {
+        const token = session?.access_token || localStorage.getItem("remoteops_token");
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+        const res = await fetch(`${API_BASE}/v1/admin/policies`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+        const data = await res.json();
+        if (data?.id) setPolicyId(data.id);
+        notify("success", "Policy updated", "Admin access policy settings were saved.");
+      } catch (err) {
+        notify("error", "Policy save failed", (err as Error).message);
+      } finally {
+        setPolicySaving(false);
+      }
+      return;
+    }
+
     const q = policyId
       ? supabase.from("admin_access_policies").update(payload).eq("id", policyId).select("id").single()
       : supabase.from("admin_access_policies").insert(payload).select("id").single();
