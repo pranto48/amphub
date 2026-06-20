@@ -9,6 +9,8 @@ import http from "node:http";
 import { URL, fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
+import crypto from "node:crypto";
+import https from "node:https";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -539,6 +541,127 @@ app.post("/api/v1/sessions/revoke", authRequired, adminOnly, async (req, res) =>
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ---------- system updates ----------
+let localSha = "unknown";
+try {
+  const shaPath = path.join(__dirname, "../git-sha.txt");
+  if (fs.existsSync(shaPath)) {
+    localSha = fs.readFileSync(shaPath, "utf8").trim();
+  } else if (fs.existsSync("/app/git-sha.txt")) {
+    localSha = fs.readFileSync("/app/git-sha.txt", "utf8").trim();
+  } else if (fs.existsSync("git-sha.txt")) {
+    localSha = fs.readFileSync("git-sha.txt", "utf8").trim();
+  }
+} catch (err) {
+  console.error("Failed to read local git SHA:", err);
+}
+
+let remoteSha = "unknown";
+let updateStatus = "UP_TO_DATE";
+let lastCheckedTimestamp = null;
+
+async function performUpdateCheck() {
+  return new Promise((resolve) => {
+    const options = {
+      hostname: 'api.github.com',
+      path: '/repos/pranto48/amphub/commits/main',
+      headers: {
+        'User-Agent': 'NodeJS-HTTPS-Client',
+        'Accept': 'application/vnd.github.v3+json'
+      },
+      timeout: 10000
+    };
+
+    const req = https.get(options, (res) => {
+      let body = "";
+      res.on("data", (chunk) => { body += chunk; });
+      res.on("end", () => {
+        lastCheckedTimestamp = new Date().toISOString();
+        if (res.statusCode === 200) {
+          try {
+            const data = JSON.parse(body);
+            if (data && data.sha) {
+              remoteSha = data.sha;
+              if (localSha !== "unknown" && remoteSha !== "unknown" && localSha !== remoteSha) {
+                updateStatus = "UPDATE_AVAILABLE";
+              } else {
+                updateStatus = "UP_TO_DATE";
+              }
+            }
+          } catch (e) {
+            console.error("Error parsing GitHub response:", e);
+          }
+        } else {
+          console.error(`GitHub API returned status code ${res.statusCode}: ${body}`);
+        }
+        resolve();
+      });
+    });
+
+    req.on("error", (err) => {
+      console.error("Failed to fetch remote commit from GitHub API:", err);
+      lastCheckedTimestamp = new Date().toISOString();
+      resolve();
+    });
+
+    req.on("timeout", () => {
+      req.destroy();
+      console.error("GitHub API request timed out.");
+      lastCheckedTimestamp = new Date().toISOString();
+      resolve();
+    });
+  });
+}
+
+// Run updates check initially and schedule it every 24 hours
+if (process.env.NODE_ENV !== "test") {
+  performUpdateCheck().then(() => {
+    console.log(`Initial update check complete. Status: ${updateStatus}, Local: ${localSha}, Remote: ${remoteSha}`);
+  }).catch((err) => {
+    console.error("Error during initial update check:", err);
+  });
+}
+setInterval(performUpdateCheck, 24 * 60 * 60 * 1000);
+
+app.get("/api/v1/system/status", authRequired, adminOnly, async (req, res) => {
+  await performUpdateCheck();
+  res.json({
+    current_commit: localSha,
+    remote_commit: remoteSha,
+    update_available: updateStatus,
+    last_checked: lastCheckedTimestamp
+  });
+});
+
+app.post("/api/v1/system/trigger-update", authRequired, adminOnly, async (req, res) => {
+  const timestamp = new Date().toISOString();
+  const secret = process.env.UPDATE_SHARED_SECRET || "change-me-in-production-update-secret";
+  const authSignature = crypto.createHmac("sha256", secret).update(timestamp).digest("hex");
+  const adminEmail = req.user.email || "admin";
+
+  const payload = {
+    status: "TRIGGERED",
+    requested_by: adminEmail,
+    timestamp: timestamp,
+    auth_signature: authSignature
+  };
+
+  const sharedDir = "/app/update-shared";
+  const triggerPath = path.join(sharedDir, "trigger.json");
+
+  try {
+    if (!fs.existsSync(sharedDir)) {
+      fs.mkdirSync(sharedDir, { recursive: true });
+    }
+    fs.writeFileSync(triggerPath, JSON.stringify(payload, null, 2), "utf8");
+    logSecurityEvent(req.user.id, "trigger_system_update", adminEmail, { timestamp, path: triggerPath });
+    res.json({ message: "System update triggered successfully", payload });
+  } catch (err) {
+    console.error("Failed to write update trigger file:", err);
+    res.status(500).json({ error: "Failed to write update trigger file: " + err.message });
   }
 });
 

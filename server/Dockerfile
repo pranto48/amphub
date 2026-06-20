@@ -7,6 +7,13 @@ COPY package.json package-lock.json* ./
 
 RUN npm ci --omit=dev
 
+# Extract git SHA
+COPY .git ./.git
+RUN apk add --no-cache git && \
+    git rev-parse HEAD > git-sha.txt || echo "unknown" > git-sha.txt && \
+    rm -rf .git && \
+    apk del git
+
 # Create a non-root user and group with predefined UID/GID (10001)
 RUN addgroup -g 10001 -S amphubgroup && \
     adduser -u 10001 -S -G amphubgroup -h /home/amphubuser amphubuser
@@ -27,6 +34,7 @@ COPY --from=builder /etc/group /etc/group
 # Copy dependencies and log folder with correct permissions
 COPY --from=builder --chown=amphubuser:amphubgroup /app/node_modules ./node_modules
 COPY --from=builder --chown=amphubuser:amphubgroup /var/log/amphub /var/log/amphub
+COPY --from=builder --chown=amphubuser:amphubgroup /app/git-sha.txt ./git-sha.txt
 
 # Copy application source
 COPY --chown=amphubuser:amphubgroup src ./src

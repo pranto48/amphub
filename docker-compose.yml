@@ -18,7 +18,8 @@ services:
 
   api:
     build:
-      context: ./server
+      context: .
+      dockerfile: server/Dockerfile
     restart: unless-stopped
     depends_on:
       db:
@@ -32,9 +33,11 @@ services:
       - NET_BIND_SERVICE
     volumes:
       - api_logs:/var/log/amphub
+      - ./update-shared:/app/update-shared
     environment:
       DATABASE_URL: postgres://remoteops:remoteops@db:5432/remoteops
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      UPDATE_SHARED_SECRET: ${UPDATE_SHARED_SECRET:-change-me-in-production-update-secret}
       CORS_ORIGIN: "*"
       PORT: "4000"
     expose:
