@@ -6,7 +6,11 @@ import pg from "pg";
 import { WebSocketServer } from "ws";
 import { z } from "zod";
 import http from "node:http";
-import { URL } from "node:url";
+import { URL, fileURLToPath } from "node:url";
+import path from "node:path";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const {
   PORT = 4000,
@@ -291,12 +295,23 @@ app.post("/api/v1/sessions/request", async (req, res) => {
     return res.status(400).json({ error: parsed.error.issues[0].message });
   }
   const { clientId, metadata = {} } = parsed.data;
+  
+  // Extract client IP address
+  const clientIpRaw = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
+  const clientIp = clientIpRaw.includes("::ffff:") ? clientIpRaw.split("::ffff:")[1] : clientIpRaw;
+  
+  const enrichedMetadata = {
+    ...metadata,
+    clientIp,
+    requestedAt: new Date().toISOString()
+  };
+
   try {
     const { rows } = await pool.query(
       `INSERT INTO session_requests (client_id, metadata, status)
        VALUES ($1, $2, 'PENDING')
        RETURNING *`,
-      [clientId, JSON.stringify(metadata)]
+      [clientId, JSON.stringify(enrichedMetadata)]
     );
     const row = rows[0];
     broadcast({ table: "session_requests", type: "INSERT", row });
@@ -369,6 +384,139 @@ app.post("/api/v1/sessions/approve", authRequired, adminOnly, async (req, res) =
   }
 });
 
+app.get("/api/v1/sessions/pending", authRequired, adminOnly, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      "SELECT * FROM session_requests WHERE status = 'PENDING' ORDER BY requested_at DESC"
+    );
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/v1/sessions/active", authRequired, adminOnly, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM session_requests 
+       WHERE status = 'APPROVED' AND expires_at > now() 
+       ORDER BY approved_at DESC`
+    );
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+const denySchema = z.object({
+  requestId: z.string().uuid(),
+});
+
+app.post("/api/v1/sessions/deny", authRequired, adminOnly, async (req, res) => {
+  const parsed = denySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0].message });
+  }
+  const { requestId } = parsed.data;
+  try {
+    const { rows } = await pool.query(
+      "SELECT * FROM session_requests WHERE id = $1",
+      [requestId]
+    );
+    const sessionReq = rows[0];
+    if (!sessionReq) {
+      return res.status(404).json({ error: "Session request not found" });
+    }
+    if (sessionReq.status !== "PENDING") {
+      return res.status(400).json({ error: `Session request is already ${sessionReq.status}` });
+    }
+
+    const { rows: updatedRows } = await pool.query(
+      `UPDATE session_requests
+       SET status = 'DENIED', decided_at = now(), decided_by = $2
+       WHERE id = $1
+       RETURNING *`,
+      [requestId, req.user.id]
+    );
+    const updatedRow = updatedRows[0];
+
+    await pool.query(
+      "INSERT INTO audit_log (actor_id, action, target, metadata) VALUES ($1, $2, $3, $4)",
+      [req.user.id, "deny_session", sessionReq.client_id, { request_id: requestId }]
+    );
+
+    broadcast({ table: "session_requests", type: "UPDATE", row: updatedRow });
+
+    res.json({
+      message: "Session request denied successfully",
+      session: updatedRow
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+const revokeSchema = z.object({
+  requestId: z.string().uuid(),
+});
+
+app.post("/api/v1/sessions/revoke", authRequired, adminOnly, async (req, res) => {
+  const parsed = revokeSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0].message });
+  }
+  const { requestId } = parsed.data;
+  try {
+    const { rows } = await pool.query(
+      "SELECT * FROM session_requests WHERE id = $1",
+      [requestId]
+    );
+    const sessionReq = rows[0];
+    if (!sessionReq) {
+      return res.status(404).json({ error: "Session request not found" });
+    }
+
+    const { rows: updatedRows } = await pool.query(
+      `UPDATE session_requests
+       SET status = 'REVOKED', decided_at = now(), decided_by = $2
+       WHERE id = $1
+       RETURNING *`,
+      [requestId, req.user.id]
+    );
+    const updatedRow = updatedRows[0];
+
+    // Find and terminate matching WebSocket connections
+    let terminatedCount = 0;
+    for (const ws of sockets) {
+      if (ws.requestId === requestId) {
+        ws.terminate();
+        sockets.delete(ws);
+        terminatedCount++;
+      }
+    }
+
+    await pool.query(
+      "INSERT INTO audit_log (actor_id, action, target, metadata) VALUES ($1, $2, $3, $4)",
+      [req.user.id, "revoke_session", sessionReq.client_id, { request_id: requestId, terminated_connections: terminatedCount }]
+    );
+
+    broadcast({ table: "session_requests", type: "UPDATE", row: updatedRow });
+
+    res.json({
+      message: "Session revoked successfully",
+      session: updatedRow,
+      terminatedCount
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Serve admin control portal
+app.get("/admin", (req, res) => {
+  res.sendFile(path.join(__dirname, "admin.html"));
+});
+
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
 // ---------- start ----------
@@ -399,6 +547,10 @@ server.on("upgrade", (req, socket, head) => {
     sockets.add(ws);
 
     if (payload.type === "session") {
+      ws.requestId = payload.requestId;
+      ws.clientId = payload.clientId;
+      ws.token = token;
+
       const remainingMs = (payload.exp * 1000) - Date.now();
       const expirationTimer = setTimeout(async () => {
         console.warn(`[SESSION] Forcefully terminating connection for session request ${payload.requestId}`);

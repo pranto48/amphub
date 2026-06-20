@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AMPHUB Remote Access Portal</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    :root {
+      --bg-dark: #0a0c10;
+      --bg-card: #131722;
+      --bg-card-hover: #1b2030;
+      --bg-input: #080a0f;
+      --text-main: #f0f2f5;
+      --text-muted: #8892b0;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --accent-glow: rgba(59, 130, 246, 0.25);
+      --success: #10b981;
+      --success-glow: rgba(16, 185, 129, 0.2);
+      --danger: #ef4444;
+      --danger-glow: rgba(239, 68, 68, 0.2);
+      --warning: #f59e0b;
+      --border: #222b3e;
+      --border-focus: #3b82f6;
+      --font-sans: 'Outfit', sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) var(--bg-dark);
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+
+    header {
+      background-color: rgba(19, 23, 34, 0.8);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, var(--accent), #6366f1);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 18px;
+      color: #fff;
+      box-shadow: 0 0 16px rgba(59, 130, 246, 0.4);
+    }
+
+    .brand-name {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      background: linear-gradient(to right, #fff, var(--text-muted));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .brand-name span {
+      color: var(--accent);
+      -webkit-text-fill-color: var(--accent);
+    }
+
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .token-input-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .token-input {
+      background-color: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 12px;
+      color: var(--text-main);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      width: 240px;
+      transition: all 0.2s;
+    }
+
+    .token-input:focus {
+      outline: none;
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 2px var(--accent-glow);
+    }
+
+    .connection-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background-color: rgba(16, 185, 129, 0.08);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+      color: var(--success);
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      background-color: var(--success);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--success);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(0.95); opacity: 0.5; }
+      50% { transform: scale(1.15); opacity: 1; }
+      100% { transform: scale(0.95); opacity: 0.5; }
+    }
+
+    main {
+      flex: 1;
+      padding: 32px;
+      max-width: 1400px;
+      margin: 0 auto;
+      width: 100%;
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 32px;
+    }
+
+    @media (max-width: 1024px) {
+      main {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .dashboard-content {
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
+    }
+
+    .card {
+      background-color: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      position: relative;
+    }
+
+    .card-title {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .card-badge {
+      background-color: var(--border);
+      color: var(--text-main);
+      font-size: 12px;
+      font-family: var(--font-mono);
+      padding: 2px 8px;
+      border-radius: 20px;
+    }
+
+    .table-container {
+      width: 100%;
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+
+    th {
+      color: var(--text-muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    td {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+      font-size: 14px;
+      vertical-align: middle;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tr {
+      transition: background-color 0.2s;
+    }
+
+    tr:hover {
+      background-color: rgba(255, 255, 255, 0.02);
+    }
+
+    .text-mono {
+      font-family: var(--font-mono);
+      font-size: 13px;
+    }
+
+    .ttl-input-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .ttl-input {
+      background-color: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      color: var(--text-main);
+      width: 70px;
+      text-align: center;
+      font-family: var(--font-sans);
+      font-size: 13px;
+    }
+
+    .ttl-input:focus {
+      outline: none;
+      border-color: var(--border-focus);
+    }
+
+    .btn {
+      padding: 8px 14px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+
+    .btn-approve {
+      background-color: var(--success);
+      color: #fff;
+    }
+
+    .btn-approve:hover {
+      background-color: #059669;
+      box-shadow: 0 0 12px var(--success-glow);
+    }
+
+    .btn-deny {
+      background-color: transparent;
+      color: var(--danger);
+      border: 1px solid var(--danger);
+    }
+
+    .btn-deny:hover {
+      background-color: var(--danger);
+      color: #fff;
+      box-shadow: 0 0 12px var(--danger-glow);
+    }
+
+    .btn-revoke {
+      background-color: rgba(239, 68, 68, 0.1);
+      color: var(--danger);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+    }
+
+    .btn-revoke:hover {
+      background-color: var(--danger);
+      color: #fff;
+      box-shadow: 0 0 12px var(--danger-glow);
+    }
+
+    .badge-status {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .badge-pending {
+      background-color: rgba(245, 158, 11, 0.1);
+      color: var(--warning);
+      border: 1px solid rgba(245, 158, 11, 0.2);
+    }
+
+    .badge-approved {
+      background-color: rgba(16, 185, 129, 0.1);
+      color: var(--success);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+    }
+
+    .badge-revoked {
+      background-color: rgba(239, 68, 68, 0.1);
+      color: var(--danger);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+    }
+
+    /* Sidebar Feed */
+    .sidebar-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
+    }
+
+    .feed-container {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-height: 400px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .feed-item {
+      background-color: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      animation: slideIn 0.3s ease-out;
+    }
+
+    @keyframes slideIn {
+      from { transform: translateX(20px); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    .feed-item-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 10px;
+    }
+
+    .feed-item-title {
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    .feed-item-desc {
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    .empty-state {
+      padding: 40px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    .empty-state svg {
+      width: 48px;
+      height: 48px;
+      margin-bottom: 12px;
+      color: var(--border);
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <div class="brand-icon">A</div>
+      <div class="brand-name">AMP<span>HUB</span> Admin</div>
+    </div>
+    <div class="header-controls">
+      <div class="token-input-wrapper">
+        <label for="token" style="font-size: 12px; color: var(--text-muted);">Admin Token:</label>
+        <input type="password" id="token" class="token-input" placeholder="Bearer Token (JWT)">
+      </div>
+      <div class="connection-status">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="status-text">Connected</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="dashboard-content">
+      <!-- Pending Queue -->
+      <section class="card">
+        <div class="card-title">
+          <span>Pending Connection Requests</span>
+          <span class="card-badge" id="pending-count">0</span>
+        </div>
+        <div class="table-container">
+          <table id="pending-table">
+            <thead>
+              <tr>
+                <th>Hostname (Client ID)</th>
+                <th>Source IP</th>
+                <th>Requested Timestamp</th>
+                <th>TTL (Minutes)</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="pending-body">
+              <tr>
+                <td colspan="5" class="empty-state">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                  </svg>
+                  <div>No pending connection requests.</div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Active Sessions -->
+      <section class="card">
+        <div class="card-title">
+          <span>Active Connection Sessions</span>
+          <span class="card-badge" id="active-count">0</span>
+        </div>
+        <div class="table-container">
+          <table id="active-table">
+            <thead>
+              <tr>
+                <th>Hostname (Client ID)</th>
+                <th>Token Expiry</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="active-body">
+              <tr>
+                <td colspan="4" class="empty-state">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                  </svg>
+                  <div>No active session authorizations.</div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- Sidebar Panels -->
+    <div class="sidebar-panel">
+      <!-- Notification Feed -->
+      <section class="card">
+        <div class="card-title">Event & Audit Feed</div>
+        <div class="feed-container" id="feed-container">
+          <div class="feed-item">
+            <div class="feed-item-header">
+              <span>SYSTEM</span>
+              <span>NOW</span>
+            </div>
+            <div class="feed-item-title">System Initialized</div>
+            <div class="feed-item-desc">Portal connected to server API endpoints. Ready to receive events.</div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    // State management
+    let pendingRequests = [];
+    let activeSessions = [];
+
+    // Elements
+    const pendingBody = document.getElementById('pending-body');
+    const activeBody = document.getElementById('active-body');
+    const pendingCount = document.getElementById('pending-count');
+    const activeCount = document.getElementById('active-count');
+    const feedContainer = document.getElementById('feed-container');
+    const tokenInput = document.getElementById('token');
+    const statusDot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+
+    // Default auth token setup: try to fetch from local storage
+    let authToken = localStorage.getItem('amphub_admin_token') || '';
+    tokenInput.value = authToken;
+
+    tokenInput.addEventListener('input', (e) => {
+      authToken = e.target.value;
+      localStorage.setItem('amphub_admin_token', authToken);
+      fetchData();
+      initWebSocket();
+    });
+
+    // Helper: format dates
+    function formatTime(isoString) {
+      if (!isoString) return '—';
+      const date = new Date(isoString);
+      return date.toLocaleString();
+    }
+
+    // Helper: log feed events
+    function addFeedEvent(title, desc, type = 'INFO') {
+      const item = document.createElement('div');
+      item.className = 'feed-item';
+      
+      let badgeColor = 'var(--text-muted)';
+      if (type === 'SUCCESS') badgeColor = 'var(--success)';
+      if (type === 'DANGER') badgeColor = 'var(--danger)';
+      if (type === 'WARNING') badgeColor = 'var(--warning)';
+
+      item.innerHTML = `
+        <div class="feed-item-header">
+          <span style="color: ${badgeColor}">${type}</span>
+          <span>${new Date().toLocaleTimeString()}</span>
+        </div>
+        <div class="feed-item-title">${title}</div>
+        <div class="feed-item-desc">${desc}</div>
+      `;
+      feedContainer.prepend(item);
+    }
+
+    // API calls
+    async function apiCall(method, path, body = null) {
+      const headers = {
+        'Content-Type': 'application/json'
+      };
+      if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
+      }
+      const options = { method, headers };
+      if (body) {
+        options.body = JSON.stringify(body);
+      }
+      
+      try {
+        const res = await fetch(path, options);
+        if (res.status === 401 || res.status === 403) {
+          addFeedEvent('Authentication Required', 'Please set a valid Admin JWT token at the top right.', 'DANGER');
+          return null;
+        }
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || `HTTP ${res.status}`);
+        }
+        return await res.json().catch(() => ({}));
+      } catch (err) {
+        addFeedEvent('API Error', err.message, 'DANGER');
+        return null;
+      }
+    }
+
+    async function fetchData() {
+      // Fetch Pending
+      const pendingData = await apiCall('GET', '/api/v1/sessions/pending');
+      if (pendingData) {
+        pendingRequests = pendingData;
+        renderPending();
+      }
+
+      // Fetch Active
+      const activeData = await apiCall('GET', '/api/v1/sessions/active');
+      if (activeData) {
+        activeSessions = activeData;
+        renderActive();
+      }
+    }
+
+    // Actions
+    async function approveRequest(requestId, ttlMinutes) {
+      if (!ttlMinutes || ttlMinutes <= 0) {
+        alert('Please enter a valid TTL in minutes.');
+        return;
+      }
+      const res = await apiCall('POST', '/api/v1/sessions/approve', { requestId, ttlMinutes });
+      if (res) {
+        addFeedEvent('Request Approved', `Request ID ${requestId.slice(0, 8)} approved for ${ttlMinutes} mins.`, 'SUCCESS');
+        fetchData();
+      }
+    }
+
+    async function denyRequest(requestId) {
+      if (!confirm('Are you sure you want to deny this access request?')) return;
+      const res = await apiCall('POST', '/api/v1/sessions/deny', { requestId });
+      if (res) {
+        addFeedEvent('Request Denied', `Request ID ${requestId.slice(0, 8)} has been denied.`, 'WARNING');
+        fetchData();
+      }
+    }
+
+    async function revokeSession(requestId) {
+      if (!confirm('Are you sure you want to revoke this active session? This will instantly drop the socket stream.')) return;
+      const res = await apiCall('POST', '/api/v1/sessions/revoke', { requestId });
+      if (res) {
+        addFeedEvent('Session Revoked', `Session for request ${requestId.slice(0, 8)} revoked. Connections dropped: ${res.terminatedCount || 0}`, 'DANGER');
+        fetchData();
+      }
+    }
+
+    // Rendering
+    function renderPending() {
+      pendingCount.textContent = pendingRequests.length;
+      if (pendingRequests.length === 0) {
+        pendingBody.innerHTML = `
+          <tr>
+            <td colspan="5" class="empty-state">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+              </svg>
+              <div>No pending connection requests.</div>
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      pendingBody.innerHTML = pendingRequests.map(r => {
+        const metadata = r.metadata || {};
+        const clientIp = metadata.clientIp || 'Unknown';
+        const requestedAt = r.requested_at || metadata.requestedAt || new Date().toISOString();
+        
+        return `
+          <tr>
+            <td class="text-mono font-medium">${r.client_id}</td>
+            <td class="text-mono">${clientIp}</td>
+            <td>${formatTime(requestedAt)}</td>
+            <td>
+              <div class="ttl-input-group">
+                <input type="number" id="ttl-${r.id}" class="ttl-input" value="15" min="1" max="1440">
+                <span style="font-size: 11px; color: var(--text-muted);">min</span>
+              </div>
+            </td>
+            <td>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-approve" onclick="approveRequest('${r.id}', parseInt(document.getElementById('ttl-${r.id}').value))">
+                  Approve
+                </button>
+                <button class="btn btn-deny" onclick="denyRequest('${r.id}')">
+                  Deny
+                </button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function renderActive() {
+      activeCount.textContent = activeSessions.length;
+      if (activeSessions.length === 0) {
+        activeBody.innerHTML = `
+          <tr>
+            <td colspan="4" class="empty-state">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+              </svg>
+              <div>No active session authorizations.</div>
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      activeBody.innerHTML = activeSessions.map(s => {
+        return `
+          <tr>
+            <td class="text-mono font-medium">${s.client_id}</td>
+            <td>${formatTime(s.expires_at)}</td>
+            <td><span class="badge-status badge-approved">Active</span></td>
+            <td>
+              <button class="btn btn-revoke" onclick="revokeSession('${s.id}')">
+                Revoke Active Session
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // WebSocket state synchronization
+    let ws = null;
+    function initWebSocket() {
+      if (ws) {
+        ws.close();
+      }
+
+      const loc = window.location;
+      const wsProto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+      const tokenQuery = authToken ? `?token=${authToken}` : '';
+      const wsUrl = `${wsProto}//${loc.host}/ws${tokenQuery}`;
+
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        statusDot.style.backgroundColor = 'var(--success)';
+        statusDot.style.boxShadow = '0 0 8px var(--success)';
+        statusText.textContent = 'Connected (Real-time)';
+        addFeedEvent('WebSocket Connected', 'Real-time synchronization established.', 'SUCCESS');
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          
+          // Handle session request broadcasts
+          if (data.table === 'session_requests') {
+            if (data.type === 'INSERT') {
+              addFeedEvent('New Connection Request', `Remote client ${data.row.client_id} requested access.`, 'WARNING');
+            } else if (data.type === 'UPDATE') {
+              addFeedEvent('Session State Updated', `Session request status changed to ${data.row.status}.`, 'INFO');
+            }
+            fetchData();
+          }
+
+          // Handle expiration signals
+          if (data.type === 'SESSION_TERMINATED') {
+            addFeedEvent('Session Terminated', `Session ID ${data.requestId.slice(0, 8)} expired and was terminated.`, 'DANGER');
+            fetchData();
+          }
+        } catch (e) {
+          console.error("Failed to parse WebSocket message:", e);
+        }
+      };
+
+      ws.onclose = () => {
+        statusDot.style.backgroundColor = 'var(--danger)';
+        statusDot.style.boxShadow = '0 0 8px var(--danger)';
+        statusText.textContent = 'Disconnected';
+        addFeedEvent('WebSocket Disconnected', 'Attempting reconnection in 5 seconds...', 'DANGER');
+        setTimeout(initWebSocket, 5000);
+      };
+
+      ws.onerror = (err) => {
+        console.error("WebSocket error:", err);
+      };
+    }
+
+    // Start
+    fetchData();
+    initWebSocket();
+  </script>
+</body>
+</html>
