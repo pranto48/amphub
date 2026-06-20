@@ -8,6 +8,7 @@ import { z } from "zod";
 import http from "node:http";
 import { URL, fileURLToPath } from "node:url";
 import path from "node:path";
+import fs from "node:fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -83,6 +84,23 @@ app.use(cors({ origin: CORS_ORIGIN }));
 app.use(express.json({ limit: "1mb" }));
 
 // ---------- helpers ----------
+function logSecurityEvent(actorId, action, target, metadata = {}) {
+  const logEvent = {
+    timestamp: new Date().toISOString(),
+    actor_id: actorId || null,
+    action,
+    target: target || null,
+    metadata
+  };
+  const logString = JSON.stringify(logEvent);
+  console.log(logString);
+  try {
+    fs.appendFileSync("/var/log/amphub/security_audit.log", logString + "\n");
+  } catch (err) {
+    // Fail silently or print to stdout if log file directory is not writable/present
+  }
+}
+
 function signToken(user) {
   return jwt.sign({ sub: user.id, email: user.email }, JWT_SECRET, { expiresIn: "7d" });
 }
@@ -138,6 +156,7 @@ app.post("/api/auth/signup", async (req, res) => {
     const user = rows[0];
     await pool.query("INSERT INTO profiles(id,email,display_name) VALUES($1,$2,$3)", [user.id, email, displayName]);
     await pool.query("INSERT INTO user_roles(user_id, role) VALUES($1,'user')", [user.id]);
+    logSecurityEvent(user.id, "user_signup", user.email, { ip: req.ip });
     res.json({ token: signToken(user), user });
   } catch (e) {
     if (e.code === "23505") return res.status(409).json({ error: "Email already registered" });
@@ -155,6 +174,7 @@ app.post("/api/auth/login", async (req, res) => {
     return res.status(401).json({ error: "Invalid email or password" });
   }
   const user = { id: u.id, email: u.email };
+  logSecurityEvent(u.id, "user_login", u.email, { ip: req.ip });
   res.json({ token: signToken(user), user });
 });
 
@@ -314,6 +334,7 @@ app.post("/api/v1/sessions/request", async (req, res) => {
       [clientId, JSON.stringify(enrichedMetadata)]
     );
     const row = rows[0];
+    logSecurityEvent(null, "session_request", clientId, { ip: clientIp });
     broadcast({ table: "session_requests", type: "INSERT", row });
     res.json(row);
   } catch (e) {
@@ -372,6 +393,8 @@ app.post("/api/v1/sessions/approve", authRequired, adminOnly, async (req, res) =
       "INSERT INTO audit_log (actor_id, action, target, metadata) VALUES ($1, $2, $3, $4)",
       [req.user.id, "approve_session", sessionReq.client_id, { request_id: requestId, ttl_minutes: ttlMinutes }]
     );
+
+    logSecurityEvent(req.user.id, "approve_session", sessionReq.client_id, { request_id: requestId, ttl_minutes: ttlMinutes });
 
     broadcast({ table: "session_requests", type: "UPDATE", row: updatedRow });
 
@@ -445,6 +468,8 @@ app.post("/api/v1/sessions/deny", authRequired, adminOnly, async (req, res) => {
       [req.user.id, "deny_session", sessionReq.client_id, { request_id: requestId }]
     );
 
+    logSecurityEvent(req.user.id, "deny_session", sessionReq.client_id, { request_id: requestId });
+
     broadcast({ table: "session_requests", type: "UPDATE", row: updatedRow });
 
     res.json({
@@ -499,6 +524,8 @@ app.post("/api/v1/sessions/revoke", authRequired, adminOnly, async (req, res) =>
       "INSERT INTO audit_log (actor_id, action, target, metadata) VALUES ($1, $2, $3, $4)",
       [req.user.id, "revoke_session", sessionReq.client_id, { request_id: requestId, terminated_connections: terminatedCount }]
     );
+
+    logSecurityEvent(req.user.id, "revoke_session", sessionReq.client_id, { request_id: requestId, terminated_connections: terminatedCount });
 
     broadcast({ table: "session_requests", type: "UPDATE", row: updatedRow });
 
@@ -563,6 +590,8 @@ server.on("upgrade", (req, socket, head) => {
           requestId: payload.requestId,
           reason: "session_expired"
         });
+
+        logSecurityEvent(null, "session_expired", payload.clientId, { request_id: payload.requestId, reason: "TTL expiration" });
 
         // Log the event
         try {
