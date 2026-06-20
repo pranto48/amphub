@@ -45,7 +45,7 @@ services:
     expose:
       - "4000"
     healthcheck:
-      test: ["CMD", "node", "src/healthcheck.js"]
+      test: ["CMD", "/nodejs/bin/node", "src/healthcheck.js"]
       interval: 5s
       timeout: 3s
       retries: 20
