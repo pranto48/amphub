@@ -8,11 +8,8 @@ COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev
 
 # Extract git SHA
-COPY .git ./.git
-RUN apk add --no-cache git && \
-    git rev-parse HEAD > git-sha.txt || echo "unknown" > git-sha.txt && \
-    rm -rf .git && \
-    apk del git
+ARG GIT_SHA=unknown
+RUN echo "$GIT_SHA" > git-sha.txt
 
 # Create a non-root user and group with predefined UID/GID (10001)
 RUN addgroup -g 10001 -S amphubgroup && \
