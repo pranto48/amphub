@@ -3,5 +3,5 @@ dist
 .output
 .git
 .lovable
-server
+# server
 *.log

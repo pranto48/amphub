@@ -3,7 +3,7 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
+COPY server/package.json server/package-lock.json* ./
 
 RUN npm ci --omit=dev
 
@@ -34,7 +34,7 @@ COPY --from=builder --chown=amphubuser:amphubgroup /var/log/amphub /var/log/amph
 COPY --from=builder --chown=amphubuser:amphubgroup /app/git-sha.txt ./git-sha.txt
 
 # Copy application source
-COPY --chown=amphubuser:amphubgroup src ./src
+COPY --chown=amphubuser:amphubgroup server/src ./src
 
 # Set runtime user
 USER amphubuser
