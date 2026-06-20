@@ -74,6 +74,21 @@ CREATE TABLE IF NOT EXISTS audit_log (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS admin_access_policies (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  auto_deny_outside_business_hours boolean NOT NULL DEFAULT false,
+  business_hours_start text NOT NULL DEFAULT '08:00',
+  business_hours_end text NOT NULL DEFAULT '18:00',
+  require_two_step_sensitive_nodes boolean NOT NULL DEFAULT false,
+  sensitive_node_ids text[] NOT NULL DEFAULT ARRAY[]::text[],
+  max_session_duration_by_role jsonb NOT NULL DEFAULT '{"user": 30, "admin": 120}'::jsonb,
+  updated_by uuid,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Seed default policy row
+INSERT INTO admin_access_policies (id) VALUES ('00000000-0000-0000-0000-000000000001') ON CONFLICT DO NOTHING;
+
 -- Optional bootstrap admin user: admin@admin.com / password
 -- Set BOOTSTRAP_DEFAULT_ADMIN=true only for first-time local/dev bootstrap.
 \getenv bootstrap_default_admin BOOTSTRAP_DEFAULT_ADMIN

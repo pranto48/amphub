@@ -710,6 +710,100 @@ app.post("/api/v1/system/trigger-update", authRequired, adminOnly, async (req, r
   }
 });
 
+// ---------- policy endpoints ----------
+app.get("/api/v1/admin/policies", authRequired, adminOnly, async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM admin_access_policies LIMIT 1");
+    if (rows[0]) {
+      // Map postgres camelCase/snake_case format to match what Supabase returned
+      const row = rows[0];
+      res.json({
+        id: row.id,
+        auto_deny_outside_business_hours: !!row.auto_deny_outside_business_hours,
+        business_hours_start: row.business_hours_start,
+        business_hours_end: row.business_hours_end,
+        require_two_step_sensitive_nodes: !!row.require_two_step_sensitive_nodes,
+        sensitive_node_ids: row.sensitive_node_ids || [],
+        max_session_duration_by_role: typeof row.max_session_duration_by_role === "string" 
+          ? JSON.parse(row.max_session_duration_by_role) 
+          : (row.max_session_duration_by_role || { user: 30, admin: 120 })
+      });
+    } else {
+      res.json({
+        id: "00000000-0000-0000-0000-000000000001",
+        auto_deny_outside_business_hours: false,
+        business_hours_start: "08:00",
+        business_hours_end: "18:00",
+        require_two_step_sensitive_nodes: false,
+        sensitive_node_ids: [],
+        max_session_duration_by_role: { user: 30, admin: 120 }
+      });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+const policySchema = z.object({
+  auto_deny_outside_business_hours: z.boolean(),
+  business_hours_start: z.string(),
+  business_hours_end: z.string(),
+  require_two_step_sensitive_nodes: z.boolean(),
+  sensitive_node_ids: z.array(z.string()),
+  max_session_duration_by_role: z.object({
+    user: z.number(),
+    admin: z.number()
+  }),
+});
+
+app.post("/api/v1/admin/policies", authRequired, adminOnly, async (req, res) => {
+  const parsed = policySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0].message });
+  }
+  const {
+    auto_deny_outside_business_hours,
+    business_hours_start,
+    business_hours_end,
+    require_two_step_sensitive_nodes,
+    sensitive_node_ids,
+    max_session_duration_by_role
+  } = parsed.data;
+
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO admin_access_policies (
+         id, auto_deny_outside_business_hours, business_hours_start, business_hours_end, 
+         require_two_step_sensitive_nodes, sensitive_node_ids, max_session_duration_by_role, 
+         updated_by, updated_at
+       ) 
+       VALUES ('00000000-0000-0000-0000-000000000001', $1, $2, $3, $4, $5, $6, $7, now())
+       ON CONFLICT (id) DO UPDATE SET
+         auto_deny_outside_business_hours = EXCLUDED.auto_deny_outside_business_hours,
+         business_hours_start = EXCLUDED.business_hours_start,
+         business_hours_end = EXCLUDED.business_hours_end,
+         require_two_step_sensitive_nodes = EXCLUDED.require_two_step_sensitive_nodes,
+         sensitive_node_ids = EXCLUDED.sensitive_node_ids,
+         max_session_duration_by_role = EXCLUDED.max_session_duration_by_role,
+         updated_by = EXCLUDED.updated_by,
+         updated_at = now()
+       RETURNING *`,
+      [
+        auto_deny_outside_business_hours,
+        business_hours_start,
+        business_hours_end,
+        require_two_step_sensitive_nodes,
+        sensitive_node_ids,
+        JSON.stringify(max_session_duration_by_role),
+        req.user.id
+      ]
+    );
+    res.json(rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Serve admin control portal
 app.get("/admin", (req, res) => {
   res.sendFile(path.join(__dirname, "admin.html"));

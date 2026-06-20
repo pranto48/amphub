@@ -21,6 +21,7 @@ import {
 
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
+import { backendMode } from "@/lib/data";
 import { RouteEmptyState, RouteLoadingState } from "@/components/route-state";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -269,6 +270,33 @@ function AdminPanel() {
   }, [updateCountdown]);
 
   const loadPolicy = React.useCallback(async () => {
+    const isRest = backendMode === "rest";
+    if (isRest) {
+      try {
+        const token = session?.access_token || localStorage.getItem("remoteops_token");
+        const headers: Record<string, string> = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+        const res = await fetch(`${API_BASE}/v1/admin/policies`, { headers });
+        if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+        const data = await res.json();
+        
+        const roleDuration = (data.max_session_duration_by_role ?? {}) as Record<string, number>;
+        setPolicyId(data.id);
+        setPolicy({
+          auto_deny_outside_business_hours: !!data.auto_deny_outside_business_hours,
+          business_hours_start: data.business_hours_start,
+          business_hours_end: data.business_hours_end,
+          require_two_step_sensitive_nodes: !!data.require_two_step_sensitive_nodes,
+          sensitive_node_ids_csv: (data.sensitive_node_ids ?? []).join(", "),
+          max_session_user_minutes: Number(roleDuration.user ?? DEFAULT_POLICY.max_session_user_minutes),
+          max_session_admin_minutes: Number(roleDuration.admin ?? DEFAULT_POLICY.max_session_admin_minutes),
+        });
+      } catch (err) {
+        notify("warning", "Policy load warning", (err as Error).message);
+      }
+      return;
+    }
+
     const { data, error } = await supabase
       .from("admin_access_policies")
       .select("id,auto_deny_outside_business_hours,business_hours_start,business_hours_end,require_two_step_sensitive_nodes,sensitive_node_ids,max_session_duration_by_role")
@@ -298,7 +326,7 @@ function AdminPanel() {
       max_session_user_minutes: Number(roleDuration.user ?? DEFAULT_POLICY.max_session_user_minutes),
       max_session_admin_minutes: Number(roleDuration.admin ?? DEFAULT_POLICY.max_session_admin_minutes),
     });
-  }, [notify]);
+  }, [notify, API_BASE, session]);
 
   const load = React.useCallback(async () => {
     setLoading(true);
