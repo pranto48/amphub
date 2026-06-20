@@ -95,7 +95,10 @@ function logSecurityEvent(actorId, action, target, metadata = {}) {
   const logString = JSON.stringify(logEvent);
   console.log(logString);
   try {
-    fs.appendFileSync("/var/log/amphub/security_audit.log", logString + "\n");
+    const logPath = process.env.NODE_ENV === "test"
+      ? "./test_security_audit.log"
+      : "/var/log/amphub/security_audit.log";
+    fs.appendFileSync(logPath, logString + "\n");
   } catch (err) {
     // Fail silently or print to stdout if log file directory is not writable/present
   }

@@ -23,6 +23,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=10M
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    volumes:
+      - api_logs:/var/log/amphub
     environment:
       DATABASE_URL: postgres://remoteops:remoteops@db:5432/remoteops
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
@@ -31,7 +40,7 @@ services:
     expose:
       - "4000"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/api/health >/dev/null || exit 1"]
+      test: ["CMD", "node", "src/healthcheck.js"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -53,3 +62,4 @@ services:
 
 volumes:
   db_data:
+  api_logs:
