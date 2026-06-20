@@ -11,7 +11,15 @@ import { supabase } from "@/integrations/supabase/client";
 import { backendMode } from "@/lib/data";
 import { toast } from "sonner";
 
-export const Route = createFileRoute("/login")({ component: LoginPage });
+const loginSearchSchema = z.object({
+  connectTo: z.string().optional(),
+  action: z.string().optional(),
+});
+
+export const Route = createFileRoute("/login")({
+  validateSearch: (search) => loginSearchSchema.parse(search),
+  component: LoginPage,
+});
 
 const schema = z.object({
   email: z.string().trim().email().max(255),
@@ -21,6 +29,7 @@ const schema = z.object({
 function LoginPage() {
   const { signIn, session } = useAuth();
   const navigate = useNavigate();
+  const search = Route.useSearch();
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [busy, setBusy] = React.useState(false);
@@ -30,8 +39,16 @@ function LoginPage() {
   }, []);
 
   React.useEffect(() => {
-    if (session) navigate({ to: "/" });
-  }, [session, navigate]);
+    if (session) {
+      navigate({
+        to: "/",
+        search: {
+          connectTo: search?.connectTo,
+          action: search?.action,
+        },
+      });
+    }
+  }, [session, navigate, search]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -74,7 +91,13 @@ function LoginPage() {
         });
       }
       toast.success("Authenticated");
-      navigate({ to: "/" });
+      navigate({
+        to: "/",
+        search: {
+          connectTo: search?.connectTo,
+          action: search?.action,
+        },
+      });
     }
   }
 

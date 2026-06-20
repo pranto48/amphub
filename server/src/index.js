@@ -15,7 +15,14 @@ const {
   CORS_ORIGIN = "*",
 } = process.env;
 
-const pool = new pg.Pool({ connectionString: DATABASE_URL });
+const pool = process.env.NODE_ENV === "test"
+  ? {
+      query: async (text, params) => {
+        if (global.mockDbQuery) return global.mockDbQuery(text, params);
+        return { rows: [], rowCount: 0 };
+      }
+    }
+  : new pg.Pool({ connectionString: DATABASE_URL });
 
 function assertSecureRuntime() {
   const nodeEnv = (process.env.NODE_ENV || "development").toLowerCase();
@@ -44,8 +51,24 @@ assertSecureRuntime();
 
 // Wait for Postgres to be ready (compose ordering is best-effort)
 async function waitForDb() {
+  if (process.env.NODE_ENV === "test") return;
   for (let i = 0; i < 30; i++) {
-    try { await pool.query("SELECT 1"); return; }
+    try {
+      await pool.query("SELECT 1");
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS session_requests (
+          id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          client_id    text NOT NULL,
+          status       text NOT NULL DEFAULT 'PENDING',
+          metadata     jsonb DEFAULT '{}'::jsonb,
+          requested_at timestamptz NOT NULL DEFAULT now(),
+          approved_at  timestamptz,
+          expires_at   timestamptz,
+          token        text
+        );
+      `);
+      return;
+    }
     catch { await new Promise((r) => setTimeout(r, 1000)); }
   }
   throw new Error("Postgres not reachable");
@@ -254,7 +277,96 @@ app.get("/api/audit", authRequired, adminOnly, async (req, res) => {
     "SELECT id, actor_id, action, target, metadata, created_at FROM audit_log ORDER BY created_at DESC LIMIT $1",
     [limit]
   );
-  res.json(rows);
+});
+
+// ---------- remote sessions ----------
+const sessionRequestSchema = z.object({
+  clientId: z.string().min(1).max(255),
+  metadata: z.record(z.any()).optional(),
+});
+
+app.post("/api/v1/sessions/request", async (req, res) => {
+  const parsed = sessionRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0].message });
+  }
+  const { clientId, metadata = {} } = parsed.data;
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO session_requests (client_id, metadata, status)
+       VALUES ($1, $2, 'PENDING')
+       RETURNING *`,
+      [clientId, JSON.stringify(metadata)]
+    );
+    const row = rows[0];
+    broadcast({ table: "session_requests", type: "INSERT", row });
+    res.json(row);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+const approveSchema = z.object({
+  requestId: z.string().uuid(),
+  ttlMinutes: z.number().int().positive().max(10080),
+});
+
+app.post("/api/v1/sessions/approve", authRequired, adminOnly, async (req, res) => {
+  const parsed = approveSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0].message });
+  }
+  const { requestId, ttlMinutes } = parsed.data;
+  try {
+    const { rows } = await pool.query(
+      "SELECT * FROM session_requests WHERE id = $1",
+      [requestId]
+    );
+    const sessionReq = rows[0];
+    if (!sessionReq) {
+      return res.status(404).json({ error: "Session request not found" });
+    }
+    if (sessionReq.status !== "PENDING") {
+      return res.status(400).json({ error: `Session request is already ${sessionReq.status}` });
+    }
+
+    const approvedAt = new Date();
+    const T_expiry_seconds = Math.floor(approvedAt.getTime() / 1000) + (ttlMinutes * 60);
+    const expiresAt = new Date(T_expiry_seconds * 1000);
+
+    const token = jwt.sign(
+      {
+        type: "session",
+        requestId: sessionReq.id,
+        clientId: sessionReq.client_id,
+        exp: T_expiry_seconds
+      },
+      JWT_SECRET
+    );
+
+    const updateResult = await pool.query(
+      `UPDATE session_requests
+       SET status = 'APPROVED', approved_at = $2, expires_at = $3, token = $4
+       WHERE id = $1
+       RETURNING *`,
+      [requestId, approvedAt, expiresAt, token]
+    );
+    const updatedRow = updateResult.rows[0];
+
+    await pool.query(
+      "INSERT INTO audit_log (actor_id, action, target, metadata) VALUES ($1, $2, $3, $4)",
+      [req.user.id, "approve_session", sessionReq.client_id, { request_id: requestId, ttl_minutes: ttlMinutes }]
+    );
+
+    broadcast({ table: "session_requests", type: "UPDATE", row: updatedRow });
+
+    res.json({
+      message: "Session request approved successfully",
+      session: updatedRow
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
@@ -267,15 +379,69 @@ server.on("upgrade", (req, socket, head) => {
   if (url.pathname !== "/ws") { socket.destroy(); return; }
   const token = url.searchParams.get("token");
   if (!token) { socket.destroy(); return; }
-  try { jwt.verify(token, JWT_SECRET); }
-  catch { socket.destroy(); return; }
+  let payload;
+  try {
+    payload = jwt.verify(token, JWT_SECRET);
+  } catch {
+    socket.destroy();
+    return;
+  }
+
+  if (payload.type === "session") {
+    const remainingMs = (payload.exp * 1000) - Date.now();
+    if (remainingMs <= 0) {
+      socket.destroy();
+      return;
+    }
+  }
+
   wss.handleUpgrade(req, socket, head, (ws) => {
     sockets.add(ws);
-    ws.on("close", () => sockets.delete(ws));
-    ws.on("error", () => sockets.delete(ws));
+
+    if (payload.type === "session") {
+      const remainingMs = (payload.exp * 1000) - Date.now();
+      const expirationTimer = setTimeout(async () => {
+        console.warn(`[SESSION] Forcefully terminating connection for session request ${payload.requestId}`);
+        ws.terminate();
+        sockets.delete(ws);
+
+        // Broadcast termination signal
+        broadcast({
+          type: "SESSION_TERMINATED",
+          requestId: payload.requestId,
+          reason: "session_expired"
+        });
+
+        // Log the event
+        try {
+          await pool.query(
+            "INSERT INTO audit_log (actor_id, action, target, metadata) VALUES ($1, $2, $3, $4)",
+            [null, "session_expired", payload.clientId, { request_id: payload.requestId, reason: "TTL expiration" }]
+          );
+        } catch (dbErr) {
+          console.error("Failed to log session expiration to audit log:", dbErr);
+        }
+      }, remainingMs);
+
+      ws.on("close", () => {
+        clearTimeout(expirationTimer);
+        sockets.delete(ws);
+      });
+      ws.on("error", () => {
+        clearTimeout(expirationTimer);
+        sockets.delete(ws);
+      });
+    } else {
+      ws.on("close", () => sockets.delete(ws));
+      ws.on("error", () => sockets.delete(ws));
+    }
   });
 });
 
-waitForDb().then(() => {
-  server.listen(PORT, () => console.log(`RemoteOps API listening on :${PORT}`));
-}).catch((e) => { console.error(e); process.exit(1); });
+if (process.env.NODE_ENV !== "test") {
+  waitForDb().then(() => {
+    server.listen(PORT, () => console.log(`RemoteOps API listening on :${PORT}`));
+  }).catch((e) => { console.error(e); process.exit(1); });
+}
+
+export { app, server, pool };

@@ -3,88 +3,660 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>amphub client setup</title>
+    <title>Amphub Client Setup</title>
     <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+      
       :root {
         color-scheme: dark;
-        --bg: #0f172a;
-        --card: #111827;
-        --text: #e5e7eb;
-        --muted: #9ca3af;
-        --border: #334155;
-        --primary: #22d3ee;
-        --danger: #f87171;
+        --bg-main: #0a0a0c;
+        --bg-sidebar: #121214;
+        --bg-card: #1b1b1f;
+        --bg-input: #0e0e10;
+        --text-primary: #ffffff;
+        --text-secondary: #9ea2b0;
+        --text-muted: #626775;
+        --border-color: #26272c;
+        --border-focus: #e21a22;
+        --anydesk-red: #e21a22;
+        --anydesk-red-hover: #c8102e;
+        --success-green: #10b981;
+        --success-green-bg: rgba(16, 185, 129, 0.08);
+        --danger-red: #f87171;
+        --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       }
-      body {
+
+      * {
+        box-sizing: border-box;
         margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: var(--font-sans);
+        background-color: var(--bg-main);
+        color: var(--text-primary);
         min-height: 100vh;
-        font-family: Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-        background: radial-gradient(circle at top, #0b2138 0%, var(--bg) 50%);
-        color: var(--text);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      /* Top Header */
+      header {
+        height: 56px;
+        background-color: var(--bg-sidebar);
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 24px;
+        user-select: none;
+      }
+
+      .logo-container {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .logo-icon {
+        width: 24px;
+        height: 24px;
+        background-color: var(--anydesk-red);
+        transform: rotate(45deg);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 4px;
+        box-shadow: 0 0 12px rgba(226, 26, 34, 0.35);
+      }
+
+      .logo-icon-inner {
+        width: 10px;
+        height: 10px;
+        background-color: var(--bg-sidebar);
+        border-radius: 2px;
+      }
+
+      .logo-text {
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: -0.4px;
+      }
+
+      .logo-text span {
+        color: var(--anydesk-red);
+        font-weight: 500;
+      }
+
+      .status-indicator {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background-color: var(--success-green-bg);
+        border: 1px solid rgba(16, 185, 129, 0.15);
+        padding: 6px 14px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--success-green);
+      }
+
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        background-color: var(--success-green);
+        border-radius: 50%;
+        box-shadow: 0 0 8px var(--success-green);
+        animation: pulse 2s infinite;
+      }
+
+      @keyframes pulse {
+        0% { transform: scale(0.95); opacity: 0.7; }
+        50% { transform: scale(1.15); opacity: 1; }
+        100% { transform: scale(0.95); opacity: 0.7; }
+      }
+
+      /* Main Content Container */
+      .app-layout {
+        flex: 1;
         display: grid;
-        place-items: center;
+        grid-template-columns: 300px 1fr;
+        height: calc(100vh - 56px);
+      }
+
+      /* Left Sidebar - "This Desk" */
+      .sidebar {
+        background-color: var(--bg-sidebar);
+        border-right: 1px solid var(--border-color);
         padding: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+        user-select: none;
       }
-      .card {
-        width: min(640px, 100%);
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        background: color-mix(in srgb, var(--card) 88%, black 12%);
-        padding: 24px;
+
+      .sidebar-section {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
       }
-      h1 { margin-top: 0; margin-bottom: 8px; }
-      p { color: var(--muted); line-height: 1.45; }
-      label { display: block; margin: 14px 0 6px; font-weight: 600; }
-      input {
-        width: 100%;
-        height: 40px;
-        border: 1px solid var(--border);
+
+      .sidebar-title {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 1.2px;
+        color: var(--text-muted);
+        font-weight: 700;
+      }
+
+      .desk-card {
+        background-color: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .desk-card-title {
+        font-size: 13px;
+        color: var(--text-secondary);
+        font-weight: 500;
+      }
+
+      .address-box {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background-color: var(--bg-input);
+        border: 1px solid var(--border-color);
         border-radius: 8px;
-        background: #0b1220;
-        color: var(--text);
-        padding: 0 12px;
-      }
-      .actions { display: flex; gap: 10px; margin-top: 16px; }
-      button {
-        height: 38px;
-        border-radius: 8px;
-        border: 1px solid transparent;
-        padding: 0 14px;
-        cursor: pointer;
-        color: #031118;
-        background: var(--primary);
+        padding: 10px 12px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 18px;
         font-weight: 600;
+        letter-spacing: 0.5px;
+        color: var(--text-primary);
       }
-      button.secondary {
-        color: var(--text);
+
+      .copy-btn {
         background: transparent;
-        border-color: var(--border);
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        padding: 6px;
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
       }
-      button:disabled { opacity: 0.6; cursor: not-allowed; }
-      .status { min-height: 20px; margin-top: 10px; color: var(--muted); }
-      .status.error { color: var(--danger); }
-      .hint { font-size: 12px; color: var(--muted); }
+
+      .copy-btn:hover {
+        background-color: var(--bg-card);
+        color: var(--text-primary);
+      }
+
+      .copy-btn svg {
+        width: 15px;
+        height: 15px;
+      }
+
+      .device-info {
+        font-size: 11px;
+        color: var(--text-muted);
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 4px;
+        border-top: 1px solid var(--border-color);
+        padding-top: 12px;
+      }
+
+      .device-info-item {
+        display: flex;
+        justify-content: space-between;
+      }
+
+      .device-info-val {
+        color: var(--text-secondary);
+        font-family: monospace;
+      }
+
+      /* Main Workspace */
+      .workspace {
+        padding: 40px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        max-width: 720px;
+        margin: 0 auto;
+        width: 100%;
+        gap: 24px;
+      }
+
+      .workspace-header {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .workspace-title {
+        font-size: 24px;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+      }
+
+      .workspace-desc {
+        font-size: 13px;
+        color: var(--text-secondary);
+        line-height: 1.45;
+      }
+
+      /* Connection Panel */
+      .connection-panel {
+        background-color: var(--bg-sidebar);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 24px;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      .input-group {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .input-label {
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        color: var(--text-secondary);
+      }
+
+      .input-wrapper {
+        position: relative;
+        display: flex;
+        align-items: center;
+      }
+
+      .input-icon {
+        position: absolute;
+        left: 14px;
+        color: var(--text-muted);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+      }
+
+      .input-icon svg {
+        width: 18px;
+        height: 18px;
+      }
+
+      .server-input {
+        width: 100%;
+        height: 46px;
+        background-color: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 0 16px 0 44px;
+        color: var(--text-primary);
+        font-size: 14px;
+        font-family: inherit;
+        transition: all 0.2s;
+      }
+
+      .server-input:focus {
+        outline: none;
+        border-color: var(--border-focus);
+        box-shadow: 0 0 0 2px rgba(226, 26, 34, 0.15);
+      }
+
+      .btn-actions {
+        display: flex;
+        gap: 12px;
+      }
+
+      .btn-connect {
+        flex: 1;
+        height: 44px;
+        background-color: var(--anydesk-red);
+        color: #ffffff;
+        border: none;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        transition: all 0.2s;
+      }
+
+      .btn-connect:hover:not(:disabled) {
+        background-color: var(--anydesk-red-hover);
+        box-shadow: 0 4px 12px rgba(226, 26, 34, 0.3);
+      }
+
+      .btn-connect:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .btn-reset {
+        height: 44px;
+        background-color: transparent;
+        color: var(--text-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 0 16px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .btn-reset:hover {
+        background-color: var(--bg-card);
+        color: var(--text-primary);
+        border-color: var(--text-muted);
+      }
+
+      /* Connection / Loading Spinner */
+      .spinner {
+        width: 16px;
+        height: 16px;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        border-top-color: #ffffff;
+        animation: spin 0.8s linear infinite;
+        display: none;
+      }
+
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+
+      .status-message {
+        font-size: 13px;
+        color: var(--text-secondary);
+        min-height: 20px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 4px;
+      }
+
+      .status-message.error {
+        color: var(--danger-red);
+      }
+
+      .status-message-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background-color: var(--text-muted);
+      }
+
+      .status-message.error .status-message-dot {
+        background-color: var(--anydesk-red);
+      }
+
+      /* Recent Connections section */
+      .recent-section {
+        border-top: 1px solid var(--border-color);
+        padding-top: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .recent-title {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+      }
+
+      .recent-cards {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .recent-card {
+        background-color: var(--bg-sidebar);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 10px 12px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .recent-card:hover {
+        background-color: var(--bg-card);
+        border-color: var(--text-muted);
+      }
+
+      .recent-icon-wrapper {
+        width: 28px;
+        height: 28px;
+        background-color: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--anydesk-red);
+      }
+
+      .recent-icon-wrapper svg {
+        width: 14px;
+        height: 14px;
+      }
+
+      .recent-info {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        overflow: hidden;
+      }
+
+      .recent-name {
+        font-size: 12px;
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .recent-status {
+        font-size: 10px;
+        color: var(--text-muted);
+      }
     </style>
   </head>
   <body>
-    <main class="card" aria-labelledby="setup-title">
-      <h1 id="setup-title">Connect amphub client</h1>
-      <p>
-        Enter the amphub server address hosted in your Docker environment.
-        The client stores this value locally and opens that URL on launch.
-      </p>
-
-      <label for="server-url">Amphub server URL</label>
-      <input id="server-url" placeholder="https://amphub.your-domain.com" autocomplete="url" />
-      <div class="hint">Example: https://amphub.example.com or http://192.168.1.10:3000</div>
-
-      <div class="actions">
-        <button id="save-connect">Save and connect</button>
-        <button id="reset" class="secondary">Reset saved server</button>
+    <!-- Top Header -->
+    <header>
+      <div class="logo-container">
+        <div class="logo-icon">
+          <div class="logo-icon-inner"></div>
+        </div>
+        <div class="logo-text">amp<span>hub</span></div>
       </div>
+      <div class="status-indicator">
+        <div class="status-dot"></div>
+        <span id="header-status">Ready</span>
+      </div>
+    </header>
 
-      <p id="status" class="status" role="status" aria-live="polite"></p>
-    </main>
+    <!-- Main App Layout -->
+    <div class="app-layout">
+      <!-- Left Sidebar (This Desk) -->
+      <aside class="sidebar">
+        <div class="sidebar-section">
+          <h2 class="sidebar-title">This Desk</h2>
+          <div class="desk-card">
+            <div class="desk-card-title">Your Address</div>
+            <div class="address-box">
+              <span id="desk-id">982 743 109</span>
+              <button id="copy-id-btn" class="copy-btn" title="Copy Address">
+                <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+              </button>
+            </div>
+            <div class="device-info">
+              <div class="device-info-item">
+                <span>Model</span>
+                <span class="device-info-val">MacBook Pro 13"</span>
+              </div>
+              <div class="device-info-item">
+                <span>Processor</span>
+                <span class="device-info-val">Intel Core i5 (x64)</span>
+              </div>
+              <div class="device-info-item">
+                <span>OS Version</span>
+                <span class="device-info-val">macOS 10.15+</span>
+              </div>
+              <div class="device-info-item">
+                <span>Ports</span>
+                <span class="device-info-val">2x Thunderbolt 3</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main Workspace -->
+      <main class="workspace">
+        <div class="workspace-header">
+          <h1 class="workspace-title">Amphub Desktop Client</h1>
+          <p class="workspace-desc">
+            Amphub secure remote desktop connection manager. Connect directly to a remote desk ID, local network IP, or manage your central directory mappings.
+          </p>
+        </div>
+
+        <!-- Connection Panel -->
+        <div class="connection-panel">
+          
+          <!-- Remote Partner Connection ID -->
+          <div class="input-group">
+            <label class="input-label" for="remote-id">Remote Desk Connection</label>
+            <div class="input-wrapper">
+              <div class="input-icon">
+                <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                </svg>
+              </div>
+              <input id="remote-id" class="server-input" placeholder="Enter Connection ID or IP (e.g. 847-291-563)" autocomplete="off" />
+            </div>
+          </div>
+
+          <div class="btn-actions">
+            <button id="btn-connect-screen" class="btn-connect">
+              <div id="screen-spinner" class="spinner"></div>
+              <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                <line x1="8" y1="21" x2="16" y2="21"></line>
+                <line x1="12" y1="17" x2="12" y2="21"></line>
+              </svg>
+              <span id="screen-btn-text">Connect to Screen</span>
+            </button>
+            <button id="btn-transfer-files" class="btn-reset" style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; border-color: var(--border-color); color: var(--text-primary);">
+              <div id="files-spinner" class="spinner"></div>
+              <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="color: var(--anydesk-red);">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                <line x1="12" y1="11" x2="12" y2="17"></line>
+                <polyline points="9 14 12 11 15 14"></polyline>
+              </svg>
+              <span id="files-btn-text">Transfer Files</span>
+            </button>
+          </div>
+
+          <!-- Directory settings section -->
+          <div style="margin-top: 4px; border-top: 1px solid var(--border-color); padding-top: 14px; display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none;" id="directory-settings-toggle">
+              <span class="input-label" style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Amphub Directory Server Settings</span>
+              <svg id="settings-chevron" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="transform: rotate(0deg); transition: transform 0.2s; color: var(--text-muted);">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+            
+            <div id="directory-settings-content" style="display: none; flex-direction: column; gap: 10px; margin-top: 6px;">
+              <div class="input-wrapper">
+                <div class="input-icon">
+                  <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+                    <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+                    <line x1="6" y1="6" x2="6.01" y2="6"></line>
+                    <line x1="6" y1="18" x2="6.01" y2="18"></line>
+                  </svg>
+                </div>
+                <input id="server-url" class="server-input" placeholder="http://192.168.20.5:6622" autocomplete="url" />
+              </div>
+              
+              <div class="btn-actions">
+                <button id="save-connect" class="btn-reset" style="background-color: var(--bg-card); flex: 1;">Save Directory Server</button>
+                <button id="reset" class="btn-reset">Reset Setup</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="status" class="status-message">
+            <div class="status-message-dot"></div>
+            <span id="status-text">Ready for server setup.</span>
+          </div>
+        </div>
+
+        <!-- Recent Connections -->
+        <div class="recent-section">
+          <h3 class="recent-title">Recent Connections</h3>
+          <div class="recent-cards">
+            <div class="recent-card" id="recent-card-1">
+              <div class="recent-icon-wrapper">
+                <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22.61 16.95A10.48 10.48 0 0 0 23 12a11 11 0 0 0-22 0 10.48 10.48 0 0 0 .39 4.95L3 19h18l1.61-2.05zM5 12h14M12 5v14"></path>
+                </svg>
+              </div>
+              <div class="recent-info">
+                <div class="recent-name">http://192.168.20.5:6622</div>
+                <div class="recent-status">Primary Server (Docker)</div>
+              </div>
+            </div>
+            <div class="recent-card" id="recent-card-2">
+              <div class="recent-icon-wrapper">
+                <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22.61 16.95A10.48 10.48 0 0 0 23 12a11 11 0 0 0-22 0 10.48 10.48 0 0 0 .39 4.95L3 19h18l1.61-2.05zM5 12h14M12 5v14"></path>
+                </svg>
+              </div>
+              <div class="recent-info">
+                <div class="recent-name">http://localhost:5173</div>
+                <div class="recent-status">Local Development</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
 
     <script src="./renderer.js"></script>
   </body>

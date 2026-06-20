@@ -1,5 +1,8 @@
 {
   "name": "tanstack_start_ts",
+  "version": "1.0.0",
+  "description": "Amphub secure remote desktop gateway client.",
+  "author": "Amphub Team",
   "private": true,
   "sideEffects": false,
   "type": "module",
@@ -17,7 +20,9 @@
     "agent:package:windows": "pwsh -File packaging/windows/build-installer.ps1",
     "electron:start": "electron .",
     "electron:dev": "ELECTRON_START_URL=http://localhost:5173 electron .",
-    "electron:dist:win": "electron-builder --win nsis",
+    "electron:dist:mac": "electron-builder --mac zip --x64",
+    "electron:dist:win": "electron-builder --win nsis --x64",
+    "electron:dist:all": "electron-builder --win nsis --mac dmg --x64",
     "electron:pack:dir": "electron-builder --dir"
   },
   "dependencies": {
@@ -107,6 +112,32 @@
       "electron/**/*",
       "package.json"
     ],
+    "mac": {
+      "target": [
+        "zip"
+      ],
+      "category": "public.app-category.utilities"
+    },
+    "dmg": {
+      "backgroundColor": "#0f172a",
+      "window": {
+        "width": 540,
+        "height": 380
+      },
+      "contents": [
+        {
+          "x": 410,
+          "y": 150,
+          "type": "link",
+          "path": "/Applications"
+        },
+        {
+          "x": 130,
+          "y": 150,
+          "type": "file"
+        }
+      ]
+    },
     "win": {
       "target": [
         "nsis"

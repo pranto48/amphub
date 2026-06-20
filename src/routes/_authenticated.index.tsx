@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { z } from "zod";
 import { supabase } from "@/integrations/supabase/client";
 import { dataClient } from "@/lib/data";
 import type { DesktopNode } from "@/lib/data/types";
@@ -15,7 +16,15 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-export const Route = createFileRoute("/_authenticated/")({ component: Dashboard });
+const dashboardSearchSchema = z.object({
+  connectTo: z.string().optional(),
+  action: z.string().optional(),
+});
+
+export const Route = createFileRoute("/_authenticated/")({
+  validateSearch: (search) => dashboardSearchSchema.parse(search),
+  component: Dashboard,
+});
 
 type Node = {
   id: string;
@@ -85,6 +94,7 @@ function getRequesterNetworkHints() {
 function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const search = Route.useSearch();
   const [nodes, setNodes] = React.useState<DesktopNode[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [lanMode, setLanMode] = React.useState(true);
@@ -116,6 +126,59 @@ function Dashboard() {
     });
     return () => unsub();
   }, [load]);
+
+  React.useEffect(() => {
+    if (loading || nodes.length === 0 || !search?.connectTo) return;
+
+    const query = search.connectTo.trim();
+    const normalized = normalizeRemoteIdForLookup(query);
+
+    let matched = nodes.find((n) => 
+      n.remote_id === query || 
+      n.remote_id === normalized || 
+      n.remote_id.replace(/\D/g, "") === query.replace(/\D/g, "")
+    );
+    
+    if (!matched) {
+      matched = nodes.find((n) => n.local_ip === query);
+    }
+
+    if (matched) {
+      void navigate({ to: "/", search: {} });
+
+      const isFiles = search.action === "files";
+      if (isFiles) {
+        toast.success(`Accessing files on ${matched.name}`, {
+          description: `Direct redirect to Remote File Transfer.`,
+        });
+        navigate({
+          to: "/nodes/$id/files",
+          params: { id: matched.id },
+          search: { local: lanMode }
+        });
+      } else {
+        if (lanMode && matched.local_ip) {
+          void auditModeDecision(matched, true);
+          toast.success(`Local connection initiated to ${matched.local_ip}`, {
+            description: `Routing through LAN to ${matched.name}`,
+          });
+          navigate({
+            to: "/nodes/$id/session",
+            params: { id: matched.id },
+            search: { local: true }
+          });
+        } else {
+          void auditModeDecision(matched, false);
+          void requestRemote(matched);
+        }
+      }
+    } else {
+      void navigate({ to: "/", search: {} });
+      toast.error("Device not found", {
+        description: `Could not locate device with Address/IP: ${query}`,
+      });
+    }
+  }, [loading, nodes, search, lanMode, navigate]);
 
   async function auditModeDecision(node: DesktopNode | Node, isLocal: boolean) {
     try {

@@ -5,4 +5,5 @@ contextBridge.exposeInMainWorld('amphubClient', {
   saveServerUrl: (serverUrl) => ipcRenderer.invoke('client:save-server-url', serverUrl),
   openConfiguredServer: () => ipcRenderer.invoke('client:open-configured-server'),
   resetServerUrl: () => ipcRenderer.invoke('client:reset-server-url'),
+  openUrl: (url) => ipcRenderer.invoke('client:open-url', url),
 });

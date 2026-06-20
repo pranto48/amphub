@@ -54,6 +54,17 @@ CREATE TABLE IF NOT EXISTS access_requests (
   expires_at    timestamptz
 );
 
+CREATE TABLE IF NOT EXISTS session_requests (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id    text NOT NULL,
+  status       text NOT NULL DEFAULT 'PENDING',
+  metadata     jsonb DEFAULT '{}'::jsonb,
+  requested_at timestamptz NOT NULL DEFAULT now(),
+  approved_at  timestamptz,
+  expires_at   timestamptz,
+  token        text
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   actor_id   uuid REFERENCES users(id) ON DELETE SET NULL,

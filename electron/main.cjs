@@ -144,6 +144,18 @@ ipcMain.handle('client:open-configured-server', async () => {
   return { ok: true };
 });
 
+ipcMain.handle('client:open-url', async (_event, incomingUrl) => {
+  const normalized = normalizeServerUrl(incomingUrl);
+  if (!normalized.ok) {
+    return { ok: false, message: normalized.reason };
+  }
+
+  if (mainWindow) {
+    await mainWindow.loadURL(normalized.value);
+  }
+  return { ok: true };
+});
+
 app.whenReady().then(() => {
   createMenu();
   createWindow();
