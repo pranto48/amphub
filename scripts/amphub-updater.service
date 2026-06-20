@@ -1,0 +1,14 @@
+[Unit]
+Description=AMPHUB Background Update Runner
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/Users/arif/Desktop/Antigravity IDE/amphub
+ExecStart=/bin/bash "/Users/arif/Desktop/Antigravity IDE/amphub/scripts/host_updater.sh"
+# Change User/Group to the user that has privileges to run docker command (e.g. root or member of docker group)
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
