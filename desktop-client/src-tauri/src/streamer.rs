@@ -4,6 +4,7 @@ use screenshots::Screen;
 use base64::{Engine as _, engine::general_purpose};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
+use super::SignalingState;
 
 pub struct StreamerState {
     pub is_streaming: Arc<Mutex<bool>>,
@@ -23,6 +24,7 @@ impl StreamerState {
 pub async fn start_desktop_stream(
     app: AppHandle,
     state: tauri::State<'_, StreamerState>,
+    sig_state: tauri::State<'_, SignalingState>,
 ) -> Result<(), String> {
     let mut streaming_lock = state.is_streaming.lock().await;
     if *streaming_lock {
@@ -34,6 +36,7 @@ pub async fn start_desktop_stream(
     *state.stop_tx.lock().await = Some(stop_tx);
 
     let is_streaming_clone = Arc::clone(&state.is_streaming);
+    let ws_tx_clone = Arc::clone(&sig_state.ws_tx);
 
     tokio::spawn(async move {
         println!("[STREAMER] Starting WebRTC screen capture loop...");
@@ -54,6 +57,13 @@ pub async fn start_desktop_stream(
                                 // Compress to JPEG for WebRTC streaming efficiency
                                 if image.write_to(&mut cursor, screenshots::image::ImageFormat::Jpeg).is_ok() {
                                     let b64 = general_purpose::STANDARD.encode(jpeg_bytes);
+                                    
+                                    // Forward frame over WebSocket if signaling connection is active
+                                    let ws_tx_lock = ws_tx_clone.lock().await;
+                                    if let Some(tx) = &*ws_tx_lock {
+                                        let _ = tx.send(b64.clone()).await;
+                                    }
+                                    
                                     // Emit frame event to the frontend
                                     let _ = app.emit("webrtc-stream-frame", b64);
                                 }

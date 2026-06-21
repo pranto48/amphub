@@ -71,6 +71,22 @@ pub async fn disconnect_signaling(
 }
 
 #[tauri::command]
+pub async fn send_signaling_message(
+    state: tauri::State<'_, SignalingState>,
+    message: String,
+) -> Result<(), String> {
+    let ws_tx_lock = state.ws_tx.lock().await;
+    if let Some(tx) = &*ws_tx_lock {
+        match tx.send(message).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(format!("Failed to send message over WebSocket channel: {}", e)),
+        }
+    } else {
+        Err("WebSocket connection is not active".to_string())
+    }
+}
+
+#[tauri::command]
 pub async fn start_signaling_connection(
     app: AppHandle,
     state: tauri::State<'_, SignalingState>,
@@ -154,7 +170,8 @@ pub async fn start_signaling_connection(
             }
         } else {
             // Real connection logic using WebSockets
-            let ws_url = format!("ws://{}:{}/ws?token={}", host, port, token);
+            let my_id = super::get_connection_id();
+            let ws_url = format!("ws://{}:{}/ws?token={}&myId={}", host, port, token, my_id);
             let mut retry_count = 0;
             
             loop {
@@ -198,7 +215,12 @@ pub async fn start_signaling_connection(
                         while let Some(message) = read.next().await {
                             match message {
                                 Ok(Message::Text(text)) => {
-                                    app.emit("session-message", text).unwrap();
+                                    // Try deserializing it as InputAction to simulate locally (if this is the host)
+                                    if let Ok(action) = serde_json::from_str::<super::InputAction>(&text) {
+                                        let _ = super::simulate_input(action);
+                                    } else {
+                                        app.emit("session-message", text.clone()).unwrap();
+                                    }
                                 }
                                 Ok(Message::Close(_)) => {
                                     break;

@@ -584,6 +584,20 @@ app.post("/api/v1/sessions/approve", authRequired, adminOnly, async (req, res) =
 
     broadcast({ table: "RemoteSessions", type: "UPDATE", row: updatedRow });
 
+    // Notify the standby host client about the approved session
+    for (const ws of signalingSockets) {
+      if (ws.isHost && ws.isStandby && ws.clientId === sessionReq.clientId) {
+        ws.send(JSON.stringify({
+          type: "admin_request",
+          action: "admin_request",
+          ip: req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1",
+          token: token,
+          requestId: requestId
+        }));
+        console.log(`[APPROVE] Sent approval admin_request payload to standby host ${ws.clientId}`);
+      }
+    }
+
     res.json({
       message: "Session request approved successfully",
       session: updatedRow
@@ -635,6 +649,26 @@ app.get("/api/v1/sessions/active", authRequired, adminOnly, async (req, res) => 
       token: s.token
     }));
     res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/v1/sessions/status/:id", async (req, res) => {
+  try {
+    const session = await prisma.remoteSession.findUnique({
+      where: { id: req.params.id }
+    });
+    if (!session) {
+      return res.status(404).json({ error: "Session request not found" });
+    }
+    res.json({
+      id: session.id,
+      clientId: session.clientId,
+      status: session.status,
+      token: session.status === "APPROVED" ? session.token : null,
+      expiresAt: session.expiresAt
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1458,12 +1492,37 @@ signalingServer.on("upgrade", async (req, socket, head) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   if (url.pathname !== "/ws") { socket.destroy(); return; }
   const token = url.searchParams.get("token");
-  if (!token) { socket.destroy(); return; }
+  const myId = url.searchParams.get("myId");
+
+  // 1. Standby Host Connection Flow
+  if (!token || token === "null" || token === "undefined" || token === "") {
+    if (myId) {
+      wssSignaling.handleUpgrade(req, socket, head, (ws) => {
+        ws.clientId = myId;
+        ws.isHost = true;
+        ws.isStandby = true;
+        signalingSockets.add(ws);
+        console.log(`[STANDBY] Client ${myId} connected as standby host.`);
+
+        ws.on("close", () => {
+          signalingSockets.delete(ws);
+          console.log(`[STANDBY] Client ${myId} disconnected.`);
+        });
+        ws.on("error", () => {
+          signalingSockets.delete(ws);
+        });
+      });
+      return;
+    }
+    socket.destroy();
+    return;
+  }
   
   let payload;
   try {
     payload = jwt.verify(token, JWT_SECRET);
   } catch {
+    socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
     socket.destroy();
     return;
   }
@@ -1536,6 +1595,17 @@ signalingServer.on("upgrade", async (req, socket, head) => {
     ws.requestId = payload.requestId;
     ws.clientId = payload.clientId;
     ws.token = token;
+    ws.myId = myId;
+
+    if (myId === payload.clientId) {
+      ws.isHost = true;
+      ws.isController = false;
+      console.log(`[SESSION] Host ${myId} joined active session ${payload.requestId}`);
+    } else {
+      ws.isHost = false;
+      ws.isController = true;
+      console.log(`[SESSION] Controller ${myId} joined active session ${payload.requestId}`);
+    }
 
     const remainingMs = (payload.exp * 1000) - Date.now();
     const expirationTimer = setTimeout(async () => {
@@ -1565,9 +1635,31 @@ signalingServer.on("upgrade", async (req, socket, head) => {
       }
     }, remainingMs);
 
+    // Bidirectional Message Forwarding
+    ws.on("message", (data) => {
+      try {
+        const messageString = data.toString();
+        // Forward message to peer in the same session
+        for (const peer of signalingSockets) {
+          if (peer !== ws && peer.requestId === ws.requestId) {
+            if (ws.isHost && peer.isController) {
+              // Host (screen capture frame) -> Controller
+              peer.send(messageString);
+            } else if (ws.isController && peer.isHost) {
+              // Controller (input simulation action) -> Host
+              peer.send(messageString);
+            }
+          }
+        }
+      } catch (e) {
+        console.error("[FORWARDING ERROR]", e);
+      }
+    });
+
     ws.on("close", () => {
       clearTimeout(expirationTimer);
       signalingSockets.delete(ws);
+      console.log(`[SESSION] Client ${myId || "unknown"} disconnected from session ${payload.requestId}`);
     });
     ws.on("error", () => {
       clearTimeout(expirationTimer);

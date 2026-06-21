@@ -47,7 +47,7 @@ function App() {
   const [isMock, setIsMock] = useState(true);
   const [myId, setMyId] = useState("Loading...");
   const [remoteScreen, setRemoteScreen] = useState<string | null>(null);
-  const [incomingRequest, setIncomingRequest] = useState<{ ip: string } | null>(null);
+  const [incomingRequest, setIncomingRequest] = useState<{ ip: string; token?: string; requestId?: string } | null>(null);
   const [isSignalingServerReachable, setIsSignalingServerReachable] = useState<boolean | null>(null);
   const [logs, setLogs] = useState<string[]>([
     "AMPHUB Core Client initialized.",
@@ -61,6 +61,14 @@ function App() {
   ]);
 
   const remoteScreenRef = useRef<HTMLDivElement>(null);
+  const pollingRef = useRef<any>(null);
+
+  const clearPolling = () => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+  };
 
   // Initialize client ID
   useEffect(() => {
@@ -74,6 +82,23 @@ function App() {
         addLog(`Failed to resolve Hardware GUID: ${err}`);
       });
   }, []);
+
+  // Auto-establish standby signaling connection on startup when not in mock mode
+  useEffect(() => {
+    if (myId && myId !== "Loading..." && myId !== "AMP-ERR-999") {
+      if (!isMock) {
+        addLog(`Auto-connecting to signaling server as standby host: ${myId}`);
+        safeInvoke("start_signaling_connection", {
+          host: hostIp,
+          port: Number(port),
+          token: "",
+          isMock: false
+        }).catch((err) => addLog(`Failed auto-connecting standby host: ${err}`));
+      } else {
+        safeInvoke("disconnect_signaling").catch(() => {});
+      }
+    }
+  }, [myId, isMock, hostIp, port]);
 
   // Persist settings and ping signaling server
   useEffect(() => {
@@ -136,7 +161,11 @@ function App() {
           try {
             const data = JSON.parse(text);
             if (data.type === "admin_request" || data.action === "admin_request") {
-              setIncomingRequest({ ip: data.ip || "192.168.9.9" });
+              setIncomingRequest({
+                ip: data.ip || "192.168.9.9",
+                token: data.token,
+                requestId: data.requestId
+              });
             }
           } catch(e) {
             // Not a JSON message, ignore
@@ -154,6 +183,7 @@ function App() {
       if (unlistenStatus) unlistenStatus();
       if (unlistenMessage) unlistenMessage();
       if (unlistenStream) unlistenStream();
+      clearPolling();
     };
   }, []);
 
@@ -163,24 +193,10 @@ function App() {
   };
 
   const handleConnect = async () => {
-    if (!isMock && !token) {
-      addLog("Error: Real WebSocket signaling requires an approved JWT session token.");
-      setStatusMessage("Failed: Token is required for secure handshake.");
-      return;
-    }
-
     try {
       addLog(`Initiating connection. Target: ${targetId}, Endpoint: ${hostIp}:${port}`);
       
-      // Start connection on Rust side
-      await safeInvoke("start_signaling_connection", {
-        host: hostIp,
-        port: Number(port),
-        token: token,
-        isMock: isMock
-      });
-
-      if (!isTauri) {
+      if (isMock) {
         // Browser mock flow
         setConnectionStatus("Connecting");
         setStatusMessage("Initiating mock handshake...");
@@ -198,15 +214,90 @@ function App() {
             setRemoteScreen("mock");
           }, 2500);
         }, 1200);
+        return;
+      }
+
+      // Real mode connection request flow
+      if (token) {
+        // Use manually supplied token if available
+        addLog("Using provided session token to connect...");
+        await safeInvoke("start_signaling_connection", {
+          host: hostIp,
+          port: Number(port),
+          token: token,
+          isMock: false
+        });
+      } else {
+        // Request a new session and poll for approval
+        setConnectionStatus("Connecting");
+        setStatusMessage("Requesting session approval from admin...");
+        addLog(`POSTing session request to /api/v1/sessions/request for target client: ${targetId}`);
+
+        const response = await fetch(`http://${hostIp}:${dashboardPort}/api/v1/sessions/request`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            clientId: targetId,
+            metadata: {
+              controllerId: myId,
+              platform: "Windows Client",
+            }
+          })
+        });
+
+        if (!response.ok) {
+          const errData = await response.json();
+          throw new Error(errData.error || "Failed to create session request");
+        }
+
+        const sessionRequest = await response.json();
+        const requestId = sessionRequest.id;
+        addLog(`Session request created. ID: ${requestId}. Status: ${sessionRequest.status}`);
+        setConnectionStatus("PendingApproval");
+        setStatusMessage("Awaiting administrator approval...");
+
+        // Start polling status
+        clearPolling();
+        pollingRef.current = setInterval(async () => {
+          try {
+            const statusRes = await fetch(`http://${hostIp}:${dashboardPort}/api/v1/sessions/status/${requestId}`);
+            if (!statusRes.ok) {
+              addLog(`Polling error: ${statusRes.statusText}`);
+              return;
+            }
+            const statusData = await statusRes.json();
+            if (statusData.status === "APPROVED" && statusData.token) {
+              clearPolling();
+              addLog("Session approved! Connecting to signaling channel...");
+              setToken(statusData.token);
+              await safeInvoke("start_signaling_connection", {
+                host: hostIp,
+                port: Number(port),
+                token: statusData.token,
+                isMock: false
+              });
+            } else if (statusData.status === "DENIED") {
+              clearPolling();
+              setConnectionStatus("Disconnected");
+              setStatusMessage("Session request denied by administrator.");
+              addLog("Session request denied.");
+            }
+          } catch (pollErr: any) {
+            addLog(`Error polling session status: ${pollErr.message || pollErr}`);
+          }
+        }, 2000);
       }
     } catch (e: any) {
-      addLog(`Connection initialization failed: ${e}`);
-      setStatusMessage(`Error: ${e}`);
+      addLog(`Connection initialization failed: ${e.message || e}`);
+      setStatusMessage(`Error: ${e.message || e}`);
       setConnectionStatus("Disconnected");
     }
   };
 
   const handleDisconnect = async () => {
+    clearPolling();
     try {
       await safeInvoke("disconnect_signaling");
       setConnectionStatus("Disconnected");
@@ -253,20 +344,47 @@ function App() {
 
     if (actionType === "click") {
       addLog(`Input Emulation: Left click at relative coordinates (${x}, ${y})`);
-      safeInvoke("simulate_input", {
-        action: {
-          type: "mouseMove",
-          x,
-          y
-        }
-      }).then(() => {
+      if (connectionStatus === "Connected" && !isMock) {
+        safeInvoke("send_signaling_message", {
+          message: JSON.stringify({
+            type: "mouseMove",
+            x,
+            y
+          })
+        }).then(() => {
+          safeInvoke("send_signaling_message", {
+            message: JSON.stringify({
+              type: "mouseClick",
+              button: "left"
+            })
+          });
+        });
+      } else {
         safeInvoke("simulate_input", {
           action: {
-            type: "mouseClick",
-            button: "left"
+            type: "mouseMove",
+            x,
+            y
           }
+        }).then(() => {
+          safeInvoke("simulate_input", {
+            action: {
+              type: "mouseClick",
+              button: "left"
+            }
+          });
         });
-      });
+      }
+    } else if (actionType === "move") {
+      if (connectionStatus === "Connected" && !isMock) {
+        safeInvoke("send_signaling_message", {
+          message: JSON.stringify({
+            type: "mouseMove",
+            x,
+            y
+          })
+        });
+      }
     }
   };
 
@@ -281,13 +399,23 @@ function App() {
     // Simulate input typing on host if connected
     if (connectionStatus === "Connected") {
       addLog(`Typing text on host: "${cmd}"`);
-      safeInvoke("simulate_input", {
-        action: {
-          type: "keyType",
-          text: cmd + "\n"
-        }
-      });
-      setTermOutput(prev => [...prev, `[Rust Emulation] Typed sequence: "${cmd}\\n"`]);
+      if (!isMock) {
+        safeInvoke("send_signaling_message", {
+          message: JSON.stringify({
+            type: "keyType",
+            text: cmd + "\n"
+          })
+        });
+        setTermOutput(prev => [...prev, `[Signaling Router] Forwarded sequence: "${cmd}\\n"`]);
+      } else {
+        safeInvoke("simulate_input", {
+          action: {
+            type: "keyType",
+            text: cmd + "\n"
+          }
+        });
+        setTermOutput(prev => [...prev, `[Rust Emulation] Typed sequence: "${cmd}\\n"`]);
+      }
     } else {
       setTermOutput(prev => [...prev, "Error: Must be connected to target to emulate keyboard inputs."]);
     }
@@ -602,11 +730,14 @@ function App() {
                         </button>
                         <button 
                           onClick={() => {
-                            // Request screenshots capture on Rust backend
-                            safeInvoke<string>("capture_screen").then((b64) => {
-                              addLog("Captured remote monitor screen.");
-                              setRemoteScreen(b64);
-                            });
+                            if (isMock) {
+                              safeInvoke<string>("capture_screen").then((b64) => {
+                                addLog("Captured remote monitor screen.");
+                                setRemoteScreen(b64);
+                              });
+                            } else {
+                              addLog("Screenshot manual capture is handled via real-time WebSocket screen stream.");
+                            }
                           }}
                           title="Capture host monitor screenshot"
                           className="p-1.5 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-rose-400 rounded-md border border-slate-800 transition-colors cursor-pointer"
@@ -629,6 +760,7 @@ function App() {
                     <div 
                       ref={remoteScreenRef}
                       onClick={(e) => handleScreenInteraction(e, "click")}
+                      onMouseMove={(e) => handleScreenInteraction(e, "move")}
                       className="aspect-video bg-neutral-900 relative cursor-crosshair overflow-hidden group select-none flex items-center justify-center border-t border-slate-800"
                     >
                       {remoteScreen === "mock" ? (
@@ -700,7 +832,7 @@ function App() {
                       ) : remoteScreen ? (
                         /* Real captured image stream */
                         <img 
-                          src={`data:image/png;base64,${remoteScreen}`}
+                          src={remoteScreen.startsWith("iVBOR") ? `data:image/png;base64,${remoteScreen}` : `data:image/jpeg;base64,${remoteScreen}`}
                           alt="Remote monitor display stream"
                           className="w-full h-full object-contain"
                         />
@@ -950,14 +1082,31 @@ function App() {
                 Deny Access
               </button>
               <button
-                onClick={() => {
+                onClick={async () => {
                   const ip = incomingRequest.ip;
+                  const requestToken = incomingRequest.token;
                   setIncomingRequest(null);
                   addLog("Approved remote access request from " + ip);
-                  setConnectionStatus("Connected");
-                  setStatusMessage("Admin control session active from " + ip);
-                  safeInvoke("start_desktop_stream");
-                  setRemoteScreen("mock");
+                  if (!isMock && requestToken) {
+                    try {
+                      setConnectionStatus("Connecting");
+                      setStatusMessage("Establishing connection for session...");
+                      await safeInvoke("start_signaling_connection", {
+                        host: hostIp,
+                        port: Number(port),
+                        token: requestToken,
+                        isMock: false
+                      });
+                    } catch (err: any) {
+                      addLog(`Failed to connect host: ${err}`);
+                      setConnectionStatus("Disconnected");
+                    }
+                  } else {
+                    setConnectionStatus("Connected");
+                    setStatusMessage("Admin control session active from " + ip);
+                    safeInvoke("start_desktop_stream");
+                    setRemoteScreen("mock");
+                  }
                 }}
                 className="cursor-pointer px-5 py-2.5 bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-rose-950 transition-all"
               >

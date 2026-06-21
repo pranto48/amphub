@@ -17,6 +17,7 @@ use signaling::{
     get_connection_status,
     disconnect_signaling,
     start_signaling_connection,
+    send_signaling_message,
     ConnectionStatus,
 };
 
@@ -96,7 +97,7 @@ async fn ping_signaling_server(host: String, port: u16) -> bool {
 }
 
 #[tauri::command]
-fn simulate_input(action: InputAction) -> Result<(), String> {
+pub fn simulate_input(action: InputAction) -> Result<(), String> {
     let mut enigo = Enigo::new();
     match action {
         InputAction::MouseMove { x, y } => {
@@ -187,6 +188,7 @@ pub fn run() {
             get_connection_status,
             disconnect_signaling,
             start_signaling_connection,
+            send_signaling_message,
             ping_signaling_server,
             start_desktop_stream,
             stop_desktop_stream,
