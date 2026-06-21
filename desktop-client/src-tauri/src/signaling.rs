@@ -200,15 +200,13 @@ pub async fn start_signaling_connection(
                                 Ok(Message::Text(text)) => {
                                     app.emit("session-message", text).unwrap();
                                 }
-                                Ok(Message::Binary(_)) => {}
-                                Ok(Message::Ping(_)) => {}
-                                Ok(Message::Pong(_)) => {}
                                 Ok(Message::Close(_)) => {
                                     break;
                                 }
                                 Err(_) => {
                                     break;
                                 }
+                                _ => {}
                             }
                         }
 

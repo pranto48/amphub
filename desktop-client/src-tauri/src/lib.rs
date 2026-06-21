@@ -102,8 +102,10 @@ fn capture_screen() -> Result<String, String> {
             if let Some(screen) = screens.first() {
                 match screen.capture() {
                     Ok(image) => {
-                        match image.to_png(None) {
-                            Ok(png_bytes) => {
+                        let mut png_bytes = Vec::new();
+                        let mut cursor = std::io::Cursor::new(&mut png_bytes);
+                        match image.write_to(&mut cursor, screenshots::image::ImageFormat::Png) {
+                            Ok(()) => {
                                 return Ok(general_purpose::STANDARD.encode(png_bytes));
                             }
                             Err(e) => println!("PNG conversion failed: {:?}", e),
