@@ -17,6 +17,8 @@ async function main() {
       requireTwoStepSensitiveNodes: false,
       sensitiveNodeIds: '[]',
       maxSessionDurationByRole: '{"user": 30, "admin": 120}',
+      dailyDeploymentEnabled: false,
+      dailyDeploymentTime: '02:00',
     },
   });
 

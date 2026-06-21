@@ -26,6 +26,9 @@ services:
       PORT_HTTP: "3355"
       PORT_SIGNAL: "7766"
       DATABASE_URL: "file:/app/data/amphub.db"
+      AMPHUB_SSH_HOST: ${AMPHUB_SSH_HOST:-192.168.9.9}
+      AMPHUB_SSH_USER: ${AMPHUB_SSH_USER:-it}
+      AMPHUB_SSH_PASS: ${AMPHUB_SSH_PASS:-Interst0ff}
     expose:
       - "3355"
       - "7766"

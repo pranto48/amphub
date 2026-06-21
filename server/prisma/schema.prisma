@@ -51,6 +51,8 @@ model AdminPermission {
   requireTwoStepSensitiveNodes Boolean  @default(false) @map("require_two_step_sensitive_nodes")
   sensitiveNodeIds             String   @default("[]") @map("sensitive_node_ids")
   maxSessionDurationByRole     String   @default("{\"user\":30,\"admin\":120}") @map("max_session_duration_by_role")
+  dailyDeploymentEnabled       Boolean  @default(false) @map("daily_deployment_enabled")
+  dailyDeploymentTime          String   @default("02:00") @map("daily_deployment_time")
   updatedBy                    String?  @map("updated_by")
   updatedAt                    DateTime @default(now()) @updatedAt @map("updated_at")
 
