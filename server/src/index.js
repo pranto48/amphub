@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
-import pg from "pg";
+import Database from "better-sqlite3";
 import { WebSocketServer } from "ws";
 import { z } from "zod";
 import http from "node:http";
@@ -20,16 +20,72 @@ const {
   DATABASE_URL = "postgres://remoteops:remoteops@db:5432/remoteops",
   JWT_SECRET = "change-me-in-production",
   CORS_ORIGIN = "*",
+  SQLITE_DB_PATH = "/app/data/amphub.db",
 } = process.env;
 
-const pool = process.env.NODE_ENV === "test"
-  ? {
-      query: async (text, params) => {
-        if (global.mockDbQuery) return global.mockDbQuery(text, params);
-        return { rows: [], rowCount: 0 };
-      }
+class SqlitePool {
+  constructor(dbPath) {
+    if (process.env.NODE_ENV === "test") {
+      this.isTest = true;
+      return;
     }
-  : new pg.Pool({ connectionString: DATABASE_URL });
+    this.isTest = false;
+    this.db = new Database(dbPath);
+    this.db.pragma("journal_mode = WAL");
+    
+    // Register custom SQL functions to match Postgres schema functions
+    this.db.function("gen_random_uuid", () => crypto.randomUUID());
+    this.db.function("now", () => new Date().toISOString());
+  }
+
+  async query(text, params = []) {
+    if (this.isTest) {
+      if (global.mockDbQuery) return global.mockDbQuery(text, params);
+      return { rows: [], rowCount: 0 };
+    }
+
+    // Convert Postgres $1, $2 placeholders to SQLite ?
+    const sqliteSql = text.replace(/\$\d+/g, "?");
+    const isSelectOrReturning = /^\s*(select|with)/i.test(sqliteSql) || /returning/i.test(sqliteSql);
+
+    try {
+      const stmt = this.db.prepare(sqliteSql);
+      if (isSelectOrReturning) {
+        const rows = stmt.all(...params);
+        
+        // Post-process JSON fields back to objects for API compatibility
+        const JSON_COLUMNS = new Set(["metadata", "sensitive_node_ids", "max_session_duration_by_role"]);
+        for (const row of rows) {
+          for (const col of JSON_COLUMNS) {
+            if (row[col] !== undefined && typeof row[col] === "string") {
+              try {
+                row[col] = JSON.parse(row[col]);
+              } catch (e) {
+                // leave as string if parse fails
+              }
+            }
+          }
+        }
+        
+        return {
+          rows,
+          rowCount: rows.length
+        };
+      } else {
+        const info = stmt.run(...params);
+        return {
+          rows: [],
+          rowCount: info.changes
+        };
+      }
+    } catch (err) {
+      console.error(`Database error executing: ${sqliteSql}`, err);
+      throw err;
+    }
+  }
+}
+
+const pool = new SqlitePool(SQLITE_DB_PATH);
 
 function assertSecureRuntime() {
   const nodeEnv = (process.env.NODE_ENV || "development").toLowerCase();
@@ -56,29 +112,10 @@ function assertSecureRuntime() {
 
 assertSecureRuntime();
 
-// Wait for Postgres to be ready (compose ordering is best-effort)
+// Initialize the database on startup (creating tables and seeding default data)
 async function waitForDb() {
   if (process.env.NODE_ENV === "test") return;
-  for (let i = 0; i < 30; i++) {
-    try {
-      await pool.query("SELECT 1");
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS session_requests (
-          id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-          client_id    text NOT NULL,
-          status       text NOT NULL DEFAULT 'PENDING',
-          metadata     jsonb DEFAULT '{}'::jsonb,
-          requested_at timestamptz NOT NULL DEFAULT now(),
-          approved_at  timestamptz,
-          expires_at   timestamptz,
-          token        text
-        );
-      `);
-      return;
-    }
-    catch { await new Promise((r) => setTimeout(r, 1000)); }
-  }
-  throw new Error("Postgres not reachable");
+  await import("./db-init.js");
 }
 
 const app = express();
@@ -122,7 +159,7 @@ function authRequired(req, res, next) {
 }
 
 async function isAdmin(userId) {
-  const { rows } = await pool.query("SELECT 1 FROM user_roles WHERE user_id=$1 AND role='admin'", [userId]);
+  const { rows } = await pool.query("SELECT 1 FROM Users WHERE id=$1 AND role='admin'", [userId]);
   return rows.length > 0;
 }
 
@@ -154,17 +191,18 @@ app.post("/api/auth/signup", async (req, res) => {
   const { email, password, displayName } = parsed.data;
   const hash = await bcrypt.hash(password, 10);
   try {
+    const userId = crypto.randomUUID();
     const { rows } = await pool.query(
-      "INSERT INTO users(email, password_hash) VALUES($1,$2) RETURNING id, email",
-      [email, hash]
+      "INSERT INTO Users(id, email, password_hash, display_name, role) VALUES($1,$2,$3,$4,$5) RETURNING id, email",
+      [userId, email, hash, displayName, "user"]
     );
     const user = rows[0];
-    await pool.query("INSERT INTO profiles(id,email,display_name) VALUES($1,$2,$3)", [user.id, email, displayName]);
-    await pool.query("INSERT INTO user_roles(user_id, role) VALUES($1,'user')", [user.id]);
     logSecurityEvent(user.id, "user_signup", user.email, { ip: req.ip });
     res.json({ token: signToken(user), user });
   } catch (e) {
-    if (e.code === "23505") return res.status(409).json({ error: "Email already registered" });
+    if (e.message && (e.message.includes("UNIQUE constraint failed") || e.code === "23505")) {
+      return res.status(409).json({ error: "Email already registered" });
+    }
     res.status(500).json({ error: e.message });
   }
 });
@@ -173,7 +211,7 @@ app.post("/api/auth/login", async (req, res) => {
   const parsed = credSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
   const { email, password } = parsed.data;
-  const { rows } = await pool.query("SELECT id, email, password_hash FROM users WHERE email=$1", [email]);
+  const { rows } = await pool.query("SELECT id, email, password_hash FROM Users WHERE email=$1", [email]);
   const u = rows[0];
   if (!u || !(await bcrypt.compare(password, u.password_hash))) {
     return res.status(401).json({ error: "Invalid email or password" });
@@ -192,13 +230,13 @@ app.post("/api/auth/password", authRequired, async (req, res) => {
   const parsed = z.object({ password: z.string().min(6).max(128) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
   const hash = await bcrypt.hash(parsed.data.password, 10);
-  await pool.query("UPDATE users SET password_hash=$1 WHERE id=$2", [hash, req.user.id]);
+  await pool.query("UPDATE Users SET password_hash=$1, updated_at=now() WHERE id=$2", [hash, req.user.id]);
   res.status(204).end();
 });
 
 // ---------- profiles ----------
 app.get("/api/profiles/:id", authRequired, async (req, res) => {
-  const { rows } = await pool.query("SELECT id,email,display_name FROM profiles WHERE id=$1", [req.params.id]);
+  const { rows } = await pool.query("SELECT id,email,display_name FROM Users WHERE id=$1", [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: "Not found" });
   res.json(rows[0]);
 });
@@ -207,7 +245,7 @@ app.patch("/api/profiles/:id", authRequired, async (req, res) => {
   if (req.params.id !== req.user.id) return res.status(403).json({ error: "Cannot edit other profiles" });
   const parsed = z.object({ display_name: z.string().min(1).max(80) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
-  await pool.query("UPDATE profiles SET display_name=$1, updated_at=now() WHERE id=$2",
+  await pool.query("UPDATE Users SET display_name=$1, updated_at=now() WHERE id=$2",
     [parsed.data.display_name, req.user.id]);
   res.status(204).end();
 });
@@ -283,7 +321,7 @@ app.post("/api/access-requests/:id/decision", authRequired, adminOnly, async (re
   const { approve } = parsed.data;
   const updateSql = approve
     ? `UPDATE access_requests SET status='approved', decided_at=now(), decided_by=$2,
-         session_token=$3, expires_at=now() + interval '15 minutes' WHERE id=$1 RETURNING *`
+         session_token=$3, expires_at=datetime(now(), '+15 minutes') WHERE id=$1 RETURNING *`
     : `UPDATE access_requests SET status='denied', decided_at=now(), decided_by=$2 WHERE id=$1 RETURNING *`;
   const params = approve
     ? [req.params.id, req.user.id, crypto.randomUUID().replace(/-/g, "")]
@@ -292,8 +330,8 @@ app.post("/api/access-requests/:id/decision", authRequired, adminOnly, async (re
   const row = rows[0];
   if (!row) return res.status(404).json({ error: "Not found" });
   await pool.query(
-    "INSERT INTO audit_log(actor_id, action, target, metadata) VALUES($1,$2,$3,$4)",
-    [req.user.id, approve ? "approve_access" : "deny_access", row.node_id, { request_id: row.id }]
+    "INSERT INTO ActionLogs(id, actor_id, action, target, metadata) VALUES($1,$2,$3,$4,$5)",
+    [crypto.randomUUID(), req.user.id, approve ? "approve_access" : "deny_access", row.node_id, JSON.stringify({ request_id: row.id })]
   );
   broadcast({ table: "access_requests", type: "UPDATE", row });
   res.json(row);
@@ -303,9 +341,10 @@ app.post("/api/access-requests/:id/decision", authRequired, adminOnly, async (re
 app.get("/api/audit", authRequired, adminOnly, async (req, res) => {
   const limit = Math.min(parseInt(String(req.query.limit ?? "20"), 10) || 20, 200);
   const { rows } = await pool.query(
-    "SELECT id, actor_id, action, target, metadata, created_at FROM audit_log ORDER BY created_at DESC LIMIT $1",
+    "SELECT id, actor_id, action, target, metadata, created_at FROM ActionLogs ORDER BY created_at DESC LIMIT $1",
     [limit]
   );
+  res.json(rows);
 });
 
 // ---------- remote sessions ----------
@@ -333,14 +372,14 @@ app.post("/api/v1/sessions/request", async (req, res) => {
 
   try {
     const { rows } = await pool.query(
-      `INSERT INTO session_requests (client_id, metadata, status)
-       VALUES ($1, $2, 'PENDING')
+      `INSERT INTO RemoteSessions (id, client_id, metadata, status)
+       VALUES (gen_random_uuid(), $1, $2, 'PENDING')
        RETURNING *`,
       [clientId, JSON.stringify(enrichedMetadata)]
     );
     const row = rows[0];
     logSecurityEvent(null, "session_request", clientId, { ip: clientIp });
-    broadcast({ table: "session_requests", type: "INSERT", row });
+    broadcast({ table: "RemoteSessions", type: "INSERT", row });
     res.json(row);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -360,7 +399,7 @@ app.post("/api/v1/sessions/approve", authRequired, adminOnly, async (req, res) =
   const { requestId, ttlMinutes } = parsed.data;
   try {
     const { rows } = await pool.query(
-      "SELECT * FROM session_requests WHERE id = $1",
+      "SELECT * FROM RemoteSessions WHERE id = $1",
       [requestId]
     );
     const sessionReq = rows[0];
@@ -386,7 +425,7 @@ app.post("/api/v1/sessions/approve", authRequired, adminOnly, async (req, res) =
     );
 
     const updateResult = await pool.query(
-      `UPDATE session_requests
+      `UPDATE RemoteSessions
        SET status = 'APPROVED', approved_at = $2, expires_at = $3, token = $4
        WHERE id = $1
        RETURNING *`,
@@ -395,13 +434,13 @@ app.post("/api/v1/sessions/approve", authRequired, adminOnly, async (req, res) =
     const updatedRow = updateResult.rows[0];
 
     await pool.query(
-      "INSERT INTO audit_log (actor_id, action, target, metadata) VALUES ($1, $2, $3, $4)",
-      [req.user.id, "approve_session", sessionReq.client_id, { request_id: requestId, ttl_minutes: ttlMinutes }]
+      "INSERT INTO ActionLogs (id, actor_id, action, target, metadata) VALUES (gen_random_uuid(), $1, $2, $3, $4)",
+      [req.user.id, "approve_session", sessionReq.client_id, JSON.stringify({ request_id: requestId, ttl_minutes: ttlMinutes })]
     );
 
     logSecurityEvent(req.user.id, "approve_session", sessionReq.client_id, { request_id: requestId, ttl_minutes: ttlMinutes });
 
-    broadcast({ table: "session_requests", type: "UPDATE", row: updatedRow });
+    broadcast({ table: "RemoteSessions", type: "UPDATE", row: updatedRow });
 
     res.json({
       message: "Session request approved successfully",
@@ -415,7 +454,7 @@ app.post("/api/v1/sessions/approve", authRequired, adminOnly, async (req, res) =
 app.get("/api/v1/sessions/pending", authRequired, adminOnly, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      "SELECT * FROM session_requests WHERE status = 'PENDING' ORDER BY requested_at DESC"
+      "SELECT * FROM RemoteSessions WHERE status = 'PENDING' ORDER BY requested_at DESC"
     );
     res.json(rows);
   } catch (e) {
@@ -426,7 +465,7 @@ app.get("/api/v1/sessions/pending", authRequired, adminOnly, async (req, res) =>
 app.get("/api/v1/sessions/active", authRequired, adminOnly, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT * FROM session_requests 
+      `SELECT * FROM RemoteSessions 
        WHERE status = 'APPROVED' AND expires_at > now() 
        ORDER BY approved_at DESC`
     );
@@ -448,7 +487,7 @@ app.post("/api/v1/sessions/deny", authRequired, adminOnly, async (req, res) => {
   const { requestId } = parsed.data;
   try {
     const { rows } = await pool.query(
-      "SELECT * FROM session_requests WHERE id = $1",
+      "SELECT * FROM RemoteSessions WHERE id = $1",
       [requestId]
     );
     const sessionReq = rows[0];
@@ -460,7 +499,7 @@ app.post("/api/v1/sessions/deny", authRequired, adminOnly, async (req, res) => {
     }
 
     const { rows: updatedRows } = await pool.query(
-      `UPDATE session_requests
+      `UPDATE RemoteSessions
        SET status = 'DENIED', decided_at = now(), decided_by = $2
        WHERE id = $1
        RETURNING *`,
@@ -469,13 +508,13 @@ app.post("/api/v1/sessions/deny", authRequired, adminOnly, async (req, res) => {
     const updatedRow = updatedRows[0];
 
     await pool.query(
-      "INSERT INTO audit_log (actor_id, action, target, metadata) VALUES ($1, $2, $3, $4)",
-      [req.user.id, "deny_session", sessionReq.client_id, { request_id: requestId }]
+      "INSERT INTO ActionLogs (id, actor_id, action, target, metadata) VALUES (gen_random_uuid(), $1, $2, $3, $4)",
+      [req.user.id, "deny_session", sessionReq.client_id, JSON.stringify({ request_id: requestId })]
     );
 
     logSecurityEvent(req.user.id, "deny_session", sessionReq.client_id, { request_id: requestId });
 
-    broadcast({ table: "session_requests", type: "UPDATE", row: updatedRow });
+    broadcast({ table: "RemoteSessions", type: "UPDATE", row: updatedRow });
 
     res.json({
       message: "Session request denied successfully",
@@ -498,7 +537,7 @@ app.post("/api/v1/sessions/revoke", authRequired, adminOnly, async (req, res) =>
   const { requestId } = parsed.data;
   try {
     const { rows } = await pool.query(
-      "SELECT * FROM session_requests WHERE id = $1",
+      "SELECT * FROM RemoteSessions WHERE id = $1",
       [requestId]
     );
     const sessionReq = rows[0];
@@ -507,7 +546,7 @@ app.post("/api/v1/sessions/revoke", authRequired, adminOnly, async (req, res) =>
     }
 
     const { rows: updatedRows } = await pool.query(
-      `UPDATE session_requests
+      `UPDATE RemoteSessions
        SET status = 'REVOKED', decided_at = now(), decided_by = $2
        WHERE id = $1
        RETURNING *`,
@@ -526,13 +565,13 @@ app.post("/api/v1/sessions/revoke", authRequired, adminOnly, async (req, res) =>
     }
 
     await pool.query(
-      "INSERT INTO audit_log (actor_id, action, target, metadata) VALUES ($1, $2, $3, $4)",
-      [req.user.id, "revoke_session", sessionReq.client_id, { request_id: requestId, terminated_connections: terminatedCount }]
+      "INSERT INTO ActionLogs (id, actor_id, action, target, metadata) VALUES (gen_random_uuid(), $1, $2, $3, $4)",
+      [req.user.id, "revoke_session", sessionReq.client_id, JSON.stringify({ request_id: requestId, terminated_connections: terminatedCount })]
     );
 
     logSecurityEvent(req.user.id, "revoke_session", sessionReq.client_id, { request_id: requestId, terminated_connections: terminatedCount });
 
-    broadcast({ table: "session_requests", type: "UPDATE", row: updatedRow });
+    broadcast({ table: "RemoteSessions", type: "UPDATE", row: updatedRow });
 
     res.json({
       message: "Session revoked successfully",
