@@ -103,18 +103,55 @@ app.use(cors({ origin: CORS_ORIGIN }));
 app.use(express.json({ limit: "1mb" }));
 
 // ---------- helpers ----------
+
+/**
+ * Resolve the real client IP from an Express or raw Node.js request.
+ * Priority order:
+ *   1. x-forwarded-for  (first value — set by Nginx/reverse proxy in Docker)
+ *   2. x-real-ip        (single-value header set by Nginx proxy_pass)
+ *   3. req.socket.remoteAddress  (direct TCP connection)
+ * Strips IPv4-mapped IPv6 prefix (::ffff:) so comparisons always use plain IPv4.
+ */
+function resolveClientIp(req) {
+  const xff = req.headers["x-forwarded-for"];
+  const xri = req.headers["x-real-ip"];
+  const remote = (req.socket && req.socket.remoteAddress) || "127.0.0.1";
+
+  let raw;
+  if (xff) {
+    raw = xff.split(",")[0].trim();
+  } else if (xri) {
+    raw = xri.trim();
+  } else {
+    raw = remote;
+  }
+
+  // Strip IPv4-mapped IPv6 prefix
+  if (raw.startsWith("::ffff:")) {
+    raw = raw.slice(7);
+  }
+  return raw || "127.0.0.1";
+}
+
+/**
+ * Compare two IPv4 addresses for Class C subnet membership.
+ * Returns true if both share the same /24 prefix (first three octets match).
+ * Loopback addresses (127.0.0.1, ::1, localhost) are treated as same-subnet.
+ * Returns false for any non-IPv4 or malformed input.
+ */
 function isSameClassCSubnet(ipA, ipB) {
   if (!ipA || !ipB) return false;
   if (ipA === ipB) return true;
-  
+
   const isLoopback = (ip) => ip === "127.0.0.1" || ip === "::1" || ip === "localhost";
   if (isLoopback(ipA) && isLoopback(ipB)) return true;
 
   const partsA = ipA.split(".");
   const partsB = ipB.split(".");
   if (partsA.length === 4 && partsB.length === 4) {
-    return partsA[0] === partsB[0] && 
-           partsA[1] === partsB[1] && 
+    // Class C comparison: octets 1, 2, 3 must match (e.g. 192.168.20.x === 192.168.20.y)
+    return partsA[0] === partsB[0] &&
+           partsA[1] === partsB[1] &&
            partsA[2] === partsB[2];
   }
   return false;
@@ -495,13 +532,10 @@ app.post("/api/v1/sessions/request", async (req, res) => {
     return res.status(400).json({ error: parsed.error.issues[0].message });
   }
   const { clientId, metadata = {} } = parsed.data;
-  
-  const clientIpRaw = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
-  let clientIp = clientIpRaw.split(",")[0].trim();
-  if (clientIp.includes("::ffff:")) {
-    clientIp = clientIp.split("::ffff:")[1];
-  }
-  
+
+  // Use the dedicated IP resolver supporting x-forwarded-for, x-real-ip, and direct socket
+  const clientIp = resolveClientIp(req);
+
   const enrichedMetadata = {
     ...metadata,
     clientIp,
@@ -602,15 +636,20 @@ app.post("/api/v1/sessions/request", async (req, res) => {
     };
     logSecurityEvent(null, "session_request_wan", clientId, { ip: clientIp, targetIp });
     broadcast({ table: "RemoteSessions", type: "INSERT", row });
-    
-    // Push WebSocket notification to Web Dashboard (port 3355)
+
+    // Push WebSocket alert to the Port 3355 Admin Web Dashboard.
+    // Includes controller and host IPs so the admin modal can show full context.
     broadcast({
-      type: "CONNECTION_REQUEST_MODAL",
+      type: "CONNECTION_REQUEST_ALERT",
       requestId: session.id,
       clientId: session.clientId,
+      controllerIp: clientIp,
+      hostIp: targetIp,
+      isLocalSubnet: false,
+      subnetPolicy: "PENDING_ADMIN",
       metadata: enrichedMetadata
     });
-    
+
     res.json(row);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1610,12 +1649,13 @@ signalingServer.on("upgrade", async (req, socket, head) => {
         ws.isStandby = true;
         ws.uniqueClientId = myId;
         
-        const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
-        let parsedIp = rawIp.split(",")[0].trim();
-        if (parsedIp.includes("::ffff:")) {
-          parsedIp = parsedIp.split("::ffff:")[1];
-        }
-        ws.remoteIp = parsedIp;
+        // Use resolveClientIp-equivalent logic for raw Node.js upgrade requests
+        const _xff_s = req.headers["x-forwarded-for"];
+        const _xri_s = req.headers["x-real-ip"];
+        const _rem_s = req.socket && req.socket.remoteAddress || "127.0.0.1";
+        let parsedIp = (_xff_s ? _xff_s.split(",")[0].trim() : (_xri_s ? _xri_s.trim() : _rem_s));
+        if (parsedIp.startsWith("::ffff:")) parsedIp = parsedIp.slice(7);
+        ws.remoteIp = parsedIp || "127.0.0.1";
         
         signalingSockets.add(ws);
         activeClients.set(myId, ws);
@@ -1717,12 +1757,13 @@ signalingServer.on("upgrade", async (req, socket, head) => {
     ws.myId = myId;
     ws.uniqueClientId = myId;
 
-    const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
-    let parsedIp = rawIp.split(",")[0].trim();
-    if (parsedIp.includes("::ffff:")) {
-      parsedIp = parsedIp.split("::ffff:")[1];
-    }
-    ws.remoteIp = parsedIp;
+    // Use resolveClientIp-equivalent logic for raw Node.js upgrade requests
+    const _xff_a = req.headers["x-forwarded-for"];
+    const _xri_a = req.headers["x-real-ip"];
+    const _rem_a = req.socket && req.socket.remoteAddress || "127.0.0.1";
+    let parsedIp = (_xff_a ? _xff_a.split(",")[0].trim() : (_xri_a ? _xri_a.trim() : _rem_a));
+    if (parsedIp.startsWith("::ffff:")) parsedIp = parsedIp.slice(7);
+    ws.remoteIp = parsedIp || "127.0.0.1";
 
     activeClients.set(myId, ws);
 
@@ -1765,7 +1806,7 @@ signalingServer.on("upgrade", async (req, socket, head) => {
     }, remainingMs);
 
     // Bidirectional Message Forwarding & Targeted Routing for WebRTC
-    ws.on("message", (data) => {
+    ws.on("message", async (data) => {
       try {
         const messageString = data.toString();
         let messageObj = null;
@@ -1794,16 +1835,64 @@ signalingServer.on("upgrade", async (req, socket, head) => {
               return;
             }
 
+            // ── Session integrity re-check ──────────────────────────────────────
+            // Before relaying any SDP packet, verify that the SQLite session record
+            // is still APPROVED. This prevents a race condition where a session was
+            // revoked or expired between WS connect time and first SDP message.
+            if (ws.requestId && messageObj.type === "offer") {
+              let sessionStillValid = false;
+              try {
+                const liveSession = await prisma.remoteSession.findUnique({
+                  where: { id: ws.requestId }
+                });
+                if (liveSession && liveSession.status === "APPROVED" && new Date(liveSession.expiresAt) > new Date()) {
+                  sessionStillValid = true;
+                } else if (liveSession && liveSession.status === "PENDING_ADMIN") {
+                  // WAN connection not yet approved — hold the SDP offer and alert admin
+                  ws.send(JSON.stringify({
+                    type: "error",
+                    error: "SDP offer blocked: session is pending administrator approval on port 3355",
+                    requestId: ws.requestId
+                  }));
+                  // Re-broadcast the alert in case admin dashboard missed the initial notification
+                  broadcast({
+                    type: "CONNECTION_REQUEST_ALERT",
+                    requestId: liveSession.id,
+                    clientId: liveSession.clientId,
+                    controllerIp: ws.remoteIp || "unknown",
+                    hostIp: (activeClients.get(targetClientId) || {}).remoteIp || "unknown",
+                    isLocalSubnet: false,
+                    subnetPolicy: "PENDING_ADMIN",
+                    metadata: liveSession.metadata ? JSON.parse(liveSession.metadata) : {}
+                  });
+                  console.warn(`[SIGNAL GATE] SDP offer from ${ws.uniqueClientId} blocked — session ${ws.requestId} is PENDING_ADMIN.`);
+                  return;
+                }
+              } catch (sessionCheckErr) {
+                console.error("[SIGNAL GATE] Session re-check failed:", sessionCheckErr);
+              }
+              if (!sessionStillValid) {
+                ws.send(JSON.stringify({
+                  type: "error",
+                  error: "SDP offer blocked: session is expired or revoked",
+                  requestId: ws.requestId
+                }));
+                console.warn(`[SIGNAL GATE] SDP offer from ${ws.uniqueClientId} rejected — session ${ws.requestId} is invalid.`);
+                return;
+              }
+            }
+            // ────────────────────────────────────────────────────────────────────
+
             // Look up target WebSocket strictly using activeClients Map
             const targetWs = activeClients.get(targetClientId);
             if (targetWs) {
-              // Route exclusively to targetWs, do not reflect back or broadcast
+              // Route exclusively to targetWs — do NOT reflect back to sender or broadcast
               targetWs.send(messageString);
             } else {
-              // Target client B is not connected, reject connection and notify client A
+              // Target client B is not connected — reject and notify client A
               ws.send(JSON.stringify({
                 type: "error",
-                error: `Target PC-2 (${targetClientId}) is offline or unregistered`,
+                error: `Target client (${targetClientId}) is offline or not registered on signaling server`,
                 target: targetClientId
               }));
             }

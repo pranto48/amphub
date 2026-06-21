@@ -1099,14 +1099,35 @@
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          
-          // Handle session request broadcasts
+
+          // Handle session request table broadcasts
           if (data.table === 'session_requests' || data.table === 'RemoteSessions') {
             if (data.type === 'INSERT') {
               addFeedEvent('New Connection Request', `Remote client ${data.row.client_id} requested access.`, 'WARNING');
             } else if (data.type === 'UPDATE') {
               addFeedEvent('Session State Updated', `Session request status changed to ${data.row.status}.`, 'INFO');
             }
+            fetchData();
+          }
+
+          // Handle WAN connection request alerts (PENDING_ADMIN gate fired)
+          // Supports both event names for forward and backward compatibility
+          if (data.type === 'CONNECTION_REQUEST_ALERT' || data.type === 'CONNECTION_REQUEST_MODAL') {
+            const cIp = data.controllerIp || (data.metadata && data.metadata.clientIp) || 'Unknown';
+            const hIp = data.hostIp || 'Unknown';
+            const cId = data.clientId || 'Unknown';
+            const rId = data.requestId || '';
+
+            // Log to feed
+            addFeedEvent(
+              '⚠️ WAN Access Request Pending',
+              `Client ${cId} (${cIp}) → Host (${hIp}). Outside local subnet — admin approval required.`,
+              'DANGER'
+            );
+
+            // Show sticky alert banner
+            showConnectionRequestBanner({ requestId: rId, clientId: cId, controllerIp: cIp, hostIp: hIp });
+
             fetchData();
           }
 
@@ -1138,6 +1159,169 @@
         console.error("WebSocket error:", err);
       };
     }
+
+    // ── WAN Connection Request Banner ───────────────────────────────────────
+    // Displays a persistent top banner with approve/deny controls when a
+    // WAN (outside local subnet) connection request arrives in real-time.
+    let activeBanner = null;
+
+    function showConnectionRequestBanner({ requestId, clientId, controllerIp, hostIp }) {
+      // Remove any existing banner first
+      if (activeBanner) {
+        activeBanner.remove();
+        activeBanner = null;
+      }
+
+      const banner = document.createElement('div');
+      banner.id = 'wan-request-banner';
+      banner.style.cssText = `
+        position: fixed;
+        top: 72px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 9999;
+        background: linear-gradient(135deg, #1a0a0a, #1f1010);
+        border: 1.5px solid rgba(239, 68, 68, 0.5);
+        border-radius: 14px;
+        padding: 18px 24px;
+        min-width: 420px;
+        max-width: 600px;
+        box-shadow: 0 8px 32px rgba(239, 68, 68, 0.3), 0 2px 8px rgba(0,0,0,0.6);
+        animation: bannerSlideIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+        font-family: var(--font-sans, 'Outfit', sans-serif);
+      `;
+      banner.innerHTML = `
+        <style>
+          @keyframes bannerSlideIn {
+            from { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+            to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+          }
+          #wan-request-banner .ban-header {
+            display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+          }
+          #wan-request-banner .ban-icon {
+            width: 36px; height: 36px;
+            background: rgba(239, 68, 68, 0.12);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px; flex-shrink: 0;
+          }
+          #wan-request-banner .ban-title {
+            font-size: 15px; font-weight: 700; color: #f87171;
+          }
+          #wan-request-banner .ban-sub {
+            font-size: 11px; color: #8892b0; margin-top: 2px;
+          }
+          #wan-request-banner .ban-details {
+            background: rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 8px;
+            padding: 10px 14px;
+            margin-bottom: 14px;
+            font-size: 12px;
+            font-family: var(--font-mono, monospace);
+            color: #cbd5e1;
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 4px 12px;
+          }
+          #wan-request-banner .ban-label { color: #8892b0; }
+          #wan-request-banner .ban-value { color: #f1f5f9; }
+          #wan-request-banner .ban-actions {
+            display: flex; gap: 10px; align-items: center;
+          }
+          #wan-request-banner .ban-ttl {
+            display: flex; align-items: center; gap: 6px; flex: 1;
+          }
+          #wan-request-banner .ban-ttl input {
+            width: 72px; padding: 7px 10px;
+            background: rgba(0,0,0,0.4);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            color: #f1f5f9; font-size: 13px;
+            text-align: center;
+          }
+          #wan-request-banner .ban-ttl label {
+            font-size: 11px; color: #8892b0;
+          }
+          #wan-request-banner .ban-approve {
+            padding: 8px 18px;
+            background: linear-gradient(135deg, #059669, #10b981);
+            border: none; border-radius: 8px;
+            color: #fff; font-weight: 700; font-size: 13px;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(16,185,129,0.3);
+            transition: opacity 0.2s;
+          }
+          #wan-request-banner .ban-approve:hover { opacity: 0.85; }
+          #wan-request-banner .ban-deny {
+            padding: 8px 18px;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 8px;
+            color: #ef4444; font-weight: 700; font-size: 13px;
+            cursor: pointer; transition: background 0.2s;
+          }
+          #wan-request-banner .ban-deny:hover { background: rgba(239,68,68,0.2); }
+          #wan-request-banner .ban-dismiss {
+            position: absolute; top: 12px; right: 14px;
+            background: none; border: none;
+            color: #8892b0; font-size: 18px; cursor: pointer;
+            line-height: 1;
+          }
+        </style>
+        <button class="ban-dismiss" onclick="document.getElementById('wan-request-banner').remove()" title="Dismiss">✕</button>
+        <div class="ban-header">
+          <div class="ban-icon">🔒</div>
+          <div>
+            <div class="ban-title">WAN Access Request — Admin Approval Required</div>
+            <div class="ban-sub">Outside local subnet detected. SDP signaling is held until you decide.</div>
+          </div>
+        </div>
+        <div class="ban-details">
+          <span class="ban-label">Client ID</span><span class="ban-value">${clientId}</span>
+          <span class="ban-label">Controller IP</span><span class="ban-value">${controllerIp}</span>
+          <span class="ban-label">Host IP</span><span class="ban-value">${hostIp}</span>
+          <span class="ban-label">Subnet Match</span><span class="ban-value" style="color:#f87171;">❌ Outside /24 Local Subnet</span>
+          <span class="ban-label">Session ID</span><span class="ban-value" style="font-size:10px;">${requestId.slice(0, 18)}…</span>
+        </div>
+        <div class="ban-actions">
+          <div class="ban-ttl">
+            <input type="number" id="ban-ttl-input" value="30" min="1" max="1440">
+            <label>min TTL</label>
+          </div>
+          <button class="ban-approve" id="ban-approve-btn">✓ Approve</button>
+          <button class="ban-deny" id="ban-deny-btn">✕ Deny</button>
+        </div>
+      `;
+
+      document.body.appendChild(banner);
+      activeBanner = banner;
+
+      document.getElementById('ban-approve-btn').addEventListener('click', async () => {
+        const ttl = parseInt(document.getElementById('ban-ttl-input').value) || 30;
+        const res = await apiCall('POST', '/api/v1/sessions/approve', { requestId, ttlMinutes: ttl });
+        if (res) {
+          addFeedEvent('WAN Session Approved', `Request ${requestId.slice(0, 8)} approved for ${ttl} min. SDP signaling released.`, 'SUCCESS');
+          banner.remove();
+          activeBanner = null;
+          fetchData();
+        }
+      });
+
+      document.getElementById('ban-deny-btn').addEventListener('click', async () => {
+        if (!confirm('Deny this WAN connection request?')) return;
+        const res = await apiCall('POST', '/api/v1/sessions/deny', { requestId });
+        if (res) {
+          addFeedEvent('WAN Session Denied', `Request ${requestId.slice(0, 8)} denied.`, 'WARNING');
+          banner.remove();
+          activeBanner = null;
+          fetchData();
+        }
+      });
+    }
+    // ────────────────────────────────────────────────────────────────────────
 
     // Start
     fetchData();
