@@ -31,9 +31,10 @@ RUN mkdir -p /app/data && \
     chown -R amphub:amphubgroup /app/data && \
     chmod 700 /app/data
 
-# Copy dependencies and git SHA
+# Copy dependencies, git SHA, and prisma schema/seeding files
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/git-sha.txt ./git-sha.txt
+COPY --from=builder /app/prisma ./prisma
 
 # Copy application source
 COPY server/src ./src
