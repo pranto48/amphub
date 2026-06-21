@@ -7,6 +7,7 @@ WORKDIR /app
 RUN apk add --no-cache build-base python3
 
 COPY server/package.json server/package-lock.json* ./
+COPY server/prisma ./prisma
 
 RUN npm ci --omit=dev
 
