@@ -454,6 +454,74 @@
     .switch-container input:checked + .switch-slider:before {
       transform: translateX(22px);
     }
+
+    /* User Management */
+    .btn-sm {
+      padding: 5px 10px;
+      font-size: 12px;
+      border-radius: 5px;
+    }
+    .btn-primary {
+      background-color: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover {
+      background-color: var(--accent-hover);
+      box-shadow: 0 0 12px var(--accent-glow);
+    }
+    .badge-role-admin {
+      background-color: rgba(59, 130, 246, 0.12);
+      color: var(--accent);
+      border: 1px solid rgba(59, 130, 246, 0.25);
+    }
+    .badge-role-user {
+      background-color: rgba(16, 185, 129, 0.12);
+      color: var(--success);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+    }
+    .inline-form {
+      background-color: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      margin-top: 16px;
+      display: none;
+    }
+    .inline-form.open { display: block; }
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .form-field label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 6px;
+    }
+    .form-field input,
+    .form-field select {
+      width: 100%;
+      background-color: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 12px;
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .form-field input:focus,
+    .form-field select:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 2px var(--accent-glow);
+    }
+    .form-actions { display: flex; gap: 8px; justify-content: flex-end; }
   </style>
 </head>
 <body>
@@ -585,6 +653,96 @@
 
         <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px; font-weight: 600; border-top: 1px solid var(--border); padding-top: 16px;">Deployment Output Log</div>
         <pre id="deploy-log-console" style="background-color: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-family: var(--font-mono); font-size: 11px; color: #a78bfa; height: 150px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;">Awaiting deployment command execution...</pre>
+      </section>
+
+      <!-- User Management Card -->
+      <section class="card" id="user-management-card" style="margin-top: 16px;">
+        <div class="card-title">
+          <span>User Management</span>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span class="card-badge" id="users-count">0</span>
+            <button class="btn btn-primary btn-sm" id="btn-show-add-user">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px; margin-right: 2px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              Add User
+            </button>
+          </div>
+        </div>
+
+        <!-- Add User Form -->
+        <div class="inline-form" id="add-user-form">
+          <div style="font-size: 13px; font-weight: 700; margin-bottom: 14px; color: var(--text-main);">Create New User</div>
+          <div class="form-grid">
+            <div class="form-field">
+              <label>Email Address</label>
+              <input type="email" id="new-user-email" placeholder="user@example.com">
+            </div>
+            <div class="form-field">
+              <label>Display Name</label>
+              <input type="text" id="new-user-name" placeholder="Full Name">
+            </div>
+            <div class="form-field">
+              <label>Password</label>
+              <input type="password" id="new-user-pass" placeholder="Min 6 characters">
+            </div>
+            <div class="form-field">
+              <label>Role</label>
+              <select id="new-user-role">
+                <option value="user">User</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-deny btn-sm" id="btn-cancel-add-user">Cancel</button>
+            <button class="btn btn-primary btn-sm" id="btn-submit-add-user">Create User</button>
+          </div>
+        </div>
+
+        <!-- Edit User Form (hidden) -->
+        <div class="inline-form" id="edit-user-form">
+          <div style="font-size: 13px; font-weight: 700; margin-bottom: 14px; color: var(--text-main);">Edit User: <span id="edit-user-email-label" style="color: var(--accent);"></span></div>
+          <input type="hidden" id="edit-user-id">
+          <div class="form-grid">
+            <div class="form-field">
+              <label>Display Name</label>
+              <input type="text" id="edit-user-name" placeholder="Full Name">
+            </div>
+            <div class="form-field">
+              <label>Role</label>
+              <select id="edit-user-role">
+                <option value="user">User</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <div class="form-field">
+              <label>New Password <span style="color: var(--text-muted); font-weight: 400;">(leave blank to keep)</span></label>
+              <input type="password" id="edit-user-pass" placeholder="Enter new password">
+            </div>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-deny btn-sm" id="btn-cancel-edit-user">Cancel</button>
+            <button class="btn btn-primary btn-sm" id="btn-submit-edit-user">Save Changes</button>
+          </div>
+        </div>
+
+        <div class="table-container" style="margin-top: 16px;">
+          <table id="users-table">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Display Name</th>
+                <th>Role</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="users-body">
+              <tr>
+                <td colspan="5" class="empty-state">Loading users...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
     </div>
 
@@ -984,6 +1142,159 @@
     // Start
     fetchData();
     initWebSocket();
+
+    // ==========================================
+    // User Management Module
+    // ==========================================
+
+    let allUsers = [];
+    const usersBody = document.getElementById('users-body');
+    const usersCount = document.getElementById('users-count');
+    const addUserForm = document.getElementById('add-user-form');
+    const editUserForm = document.getElementById('edit-user-form');
+    const btnShowAddUser = document.getElementById('btn-show-add-user');
+    const btnCancelAddUser = document.getElementById('btn-cancel-add-user');
+    const btnSubmitAddUser = document.getElementById('btn-submit-add-user');
+    const btnCancelEditUser = document.getElementById('btn-cancel-edit-user');
+    const btnSubmitEditUser = document.getElementById('btn-submit-edit-user');
+
+    async function fetchUsers() {
+      const data = await apiCall('GET', '/api/v1/admin/users');
+      if (data) {
+        allUsers = data;
+        renderUsers();
+      }
+    }
+
+    function renderUsers() {
+      usersCount.textContent = allUsers.length;
+      if (allUsers.length === 0) {
+        usersBody.innerHTML = `<tr><td colspan="5" class="empty-state">No users found.</td></tr>`;
+        return;
+      }
+
+      usersBody.innerHTML = allUsers.map(u => {
+        const roleBadgeClass = u.role === 'admin' ? 'badge-role-admin' : 'badge-role-user';
+        const created = u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '—';
+        return `
+          <tr>
+            <td class="text-mono">${u.email}</td>
+            <td>${u.displayName || '<span style="color:var(--text-muted)">—</span>'}</td>
+            <td><span class="badge-status ${roleBadgeClass}">${u.role}</span></td>
+            <td style="font-size: 12px; color: var(--text-muted);">${created}</td>
+            <td>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                <button class="btn btn-sm" style="background:rgba(59,130,246,0.1);color:var(--accent);border:1px solid rgba(59,130,246,0.2);" onclick="openEditUser('${u.id}','${u.email}','${u.displayName || ''}','${u.role}')">
+                  Edit
+                </button>
+                <button class="btn btn-deny btn-sm" onclick="deleteUser('${u.id}','${u.email}')">
+                  Delete
+                </button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    btnShowAddUser.addEventListener('click', () => {
+      addUserForm.classList.toggle('open');
+      editUserForm.classList.remove('open');
+      if (addUserForm.classList.contains('open')) {
+        btnShowAddUser.textContent = '✕ Cancel';
+      } else {
+        btnShowAddUser.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;margin-right:2px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> Add User`;
+      }
+    });
+
+    btnCancelAddUser.addEventListener('click', () => {
+      addUserForm.classList.remove('open');
+      btnShowAddUser.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;margin-right:2px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> Add User`;
+      document.getElementById('new-user-email').value = '';
+      document.getElementById('new-user-name').value = '';
+      document.getElementById('new-user-pass').value = '';
+      document.getElementById('new-user-role').value = 'user';
+    });
+
+    btnSubmitAddUser.addEventListener('click', async () => {
+      const email = document.getElementById('new-user-email').value.trim();
+      const displayName = document.getElementById('new-user-name').value.trim();
+      const password = document.getElementById('new-user-pass').value;
+      const role = document.getElementById('new-user-role').value;
+
+      if (!email || !displayName || !password) {
+        alert('Please fill in all required fields.');
+        return;
+      }
+
+      btnSubmitAddUser.disabled = true;
+      btnSubmitAddUser.textContent = 'Creating...';
+      const res = await apiCall('POST', '/api/v1/admin/users', { email, displayName, password, role });
+      btnSubmitAddUser.disabled = false;
+      btnSubmitAddUser.textContent = 'Create User';
+
+      if (res) {
+        addFeedEvent('User Created', `New ${role} user "${displayName}" (${email}) created.`, 'SUCCESS');
+        btnCancelAddUser.click();
+        fetchUsers();
+      }
+    });
+
+    function openEditUser(id, email, displayName, role) {
+      editUserForm.classList.add('open');
+      addUserForm.classList.remove('open');
+      document.getElementById('edit-user-id').value = id;
+      document.getElementById('edit-user-email-label').textContent = email;
+      document.getElementById('edit-user-name').value = displayName;
+      document.getElementById('edit-user-role').value = role;
+      document.getElementById('edit-user-pass').value = '';
+      editUserForm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    btnCancelEditUser.addEventListener('click', () => {
+      editUserForm.classList.remove('open');
+    });
+
+    btnSubmitEditUser.addEventListener('click', async () => {
+      const id = document.getElementById('edit-user-id').value;
+      const displayName = document.getElementById('edit-user-name').value.trim();
+      const role = document.getElementById('edit-user-role').value;
+      const password = document.getElementById('edit-user-pass').value;
+
+      const body = { displayName, role };
+      if (password) body.password = password;
+
+      btnSubmitEditUser.disabled = true;
+      btnSubmitEditUser.textContent = 'Saving...';
+      const res = await apiCall('PATCH', `/api/v1/admin/users/${id}`, body);
+      btnSubmitEditUser.disabled = false;
+      btnSubmitEditUser.textContent = 'Save Changes';
+
+      if (res) {
+        addFeedEvent('User Updated', `User ${res.email} updated (role: ${res.role}).`, 'SUCCESS');
+        editUserForm.classList.remove('open');
+        fetchUsers();
+      }
+    });
+
+    async function deleteUser(id, email) {
+      if (!confirm(`Are you sure you want to permanently delete user "${email}"? This cannot be undone.`)) return;
+      const res = await fetch(`/api/v1/admin/users/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      });
+      if (res.status === 204) {
+        addFeedEvent('User Deleted', `User "${email}" has been permanently removed.`, 'DANGER');
+        fetchUsers();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        addFeedEvent('Delete Failed', data.error || 'Failed to delete user.', 'DANGER');
+      }
+    }
+
+    // Initial fetch of users when token is available
+    setTimeout(() => { if (authToken) fetchUsers(); }, 500);
+    tokenInput.addEventListener('input', () => { setTimeout(fetchUsers, 300); });
   </script>
 </body>
 </html>
