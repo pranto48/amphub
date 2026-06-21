@@ -3,6 +3,9 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# Install native dependencies for compiling better-sqlite3
+RUN apk add --no-cache build-base python3
+
 COPY server/package.json server/package-lock.json* ./
 
 RUN npm ci --omit=dev
@@ -11,35 +14,31 @@ RUN npm ci --omit=dev
 ARG GIT_SHA=unknown
 RUN echo "$GIT_SHA" > git-sha.txt
 
-# Create a non-root user and group with predefined UID/GID (10001)
-RUN addgroup -g 10001 -S amphubgroup && \
-    adduser -u 10001 -S -G amphubgroup -h /home/amphubuser amphubuser
-
-# Create log directory and assign ownership
-RUN mkdir -p /var/log/amphub && \
-    chown -R amphubuser:amphubgroup /var/log/amphub
-
 # --- runtime stage ---
-FROM gcr.io/distroless/nodejs20-debian12 AS runner
+FROM node:20-alpine AS runner
 
 WORKDIR /app
 
-# Copy passwd and group definitions for user mapping
-COPY --from=builder /etc/passwd /etc/passwd
-COPY --from=builder /etc/group /etc/group
+# Create a non-root user and group with predefined UID/GID (10001)
+RUN addgroup -g 10001 -S amphubgroup && \
+    adduser -u 10001 -S -G amphubgroup -h /home/amphub amphub
 
-# Copy dependencies and log folder with correct permissions
-COPY --from=builder --chown=amphubuser:amphubgroup /app/node_modules ./node_modules
-COPY --from=builder --chown=amphubuser:amphubgroup /var/log/amphub /var/log/amphub
-COPY --from=builder --chown=amphubuser:amphubgroup /app/git-sha.txt ./git-sha.txt
+# Create persistent data directory and grant write access only to it
+RUN mkdir -p /app/data && \
+    chown -R amphub:amphubgroup /app/data && \
+    chmod 700 /app/data
+
+# Copy dependencies and git SHA
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/git-sha.txt ./git-sha.txt
 
 # Copy application source
-COPY --chown=amphubuser:amphubgroup server/src ./src
+COPY server/src ./src
 
 # Set runtime user
-USER amphubuser
+USER amphub
 
 EXPOSE 4000
 
-# distroless node image has node binary as entrypoint, so CMD is the script path
-CMD ["src/index.js"]
+# Run the backend app
+CMD ["node", "src/index.js"]

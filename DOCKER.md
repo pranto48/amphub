@@ -8,15 +8,13 @@ Use this for all new installs.
 
 ### Services
 
-- `db` — PostgreSQL 16 with schema/bootstrap from `server/init.sql`
-- `api` — Node/Express + WebSocket backend on internal port `4000`
+- `api` — Node/Express + WebSocket backend on internal port `4000` (embedded SQLite database engine)
 - `web` — Nginx serving the SPA and proxying `/api` + `/ws` to `api`
 
 ### Exposed ports
 
-- `web`: `8080:80` (open app at `http://localhost:8080`)
-- `db`: no host port published (internal to compose network)
-- `api`: no host port published (internal to compose network, exposed to `web` as `4000`)
+- `web`: `3355:80` (open app at `http://localhost:3355`)
+- `api`: `7766:4000` (connection signaling service, exposed to host on `7766`)
 
 ### Startup command
 
@@ -80,20 +78,20 @@ docker compose \
 
 Older docs and examples in this project referred to a Supabase gateway + app setup with different ports/files.
 
-- **Old app URL/port:** `http://localhost:4455`
-- **New app URL/port:** `http://localhost:8080`
+- **Old app URL/port:** `http://localhost:8080`
+- **New app URL/port:** `http://localhost:3355`
 - **Old gateway URL/port:** `http://localhost:8000` (Kong/Supabase gateway)
-- **New default:** no Kong gateway in the canonical stack
-- **Old file assumptions:** a compose file including `app`, `kong`, `auth`, `rest`, `realtime`
-- **New canonical file:** `docker-compose.yml` with `db`, `api`, `web`
+- **New default:** no Kong gateway in the canonical stack, direct nginx + SQLite architecture
+- **Old file assumptions:** a compose file including `db`, `api`, `web` using PostgreSQL
+- **New canonical file:** `docker-compose.yml` with `api`, `web` using embedded SQLite
 
 ## Reset database
 
-To wipe all data and re-run `server/init.sql`:
+To wipe all data and reset the database:
 
 ```bash
-docker compose down -v
-docker compose up --build -d
+rm -rf ./data/*
+docker compose restart api
 ```
 
 ## Troubleshooting startup/readiness
@@ -111,9 +109,8 @@ docker compose ps
 docker compose logs -f db api web
 ```
 
-If `api` is repeatedly unhealthy, verify database reachability and environment:
+If `api` is repeatedly unhealthy, verify the application health endpoint:
 
 ```bash
-docker compose exec api sh -lc 'echo "$DATABASE_URL"'
 docker compose exec api sh -lc 'wget -qO- http://127.0.0.1:4000/api/health && echo'
 ```

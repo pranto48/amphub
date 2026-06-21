@@ -30,7 +30,7 @@ const { app, server, pool } = await import("./src/index.js");
 
 // Mock Query Handler
 global.mockDbQuery = async (text, params) => {
-  if (text.includes("SELECT 1 FROM user_roles")) {
+  if (text.includes("SELECT 1 FROM user_roles") || (text.includes("Users") && text.includes("role='admin'"))) {
     return { rows: [{ 1: 1 }], rowCount: 1 };
   }
   return { rows: [], rowCount: 0 };

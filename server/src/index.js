@@ -30,6 +30,13 @@ class SqlitePool {
       return;
     }
     this.isTest = false;
+    
+    // Ensure parent directory exists before creating Database connection
+    const dir = path.dirname(dbPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
     this.db = new Database(dbPath);
     this.db.pragma("journal_mode = WAL");
     
@@ -136,7 +143,7 @@ function logSecurityEvent(actorId, action, target, metadata = {}) {
   try {
     const logPath = process.env.NODE_ENV === "test"
       ? "./test_security_audit.log"
-      : "/var/log/amphub/security_audit.log";
+      : "/app/data/security_audit.log";
     fs.appendFileSync(logPath, logString + "\n");
   } catch (err) {
     // Fail silently or print to stdout if log file directory is not writable/present
@@ -752,9 +759,8 @@ app.post("/api/v1/system/trigger-update", authRequired, adminOnly, async (req, r
 // ---------- policy endpoints ----------
 app.get("/api/v1/admin/policies", authRequired, adminOnly, async (req, res) => {
   try {
-    const { rows } = await pool.query("SELECT * FROM admin_access_policies LIMIT 1");
+    const { rows } = await pool.query("SELECT * FROM AdminPermissions LIMIT 1");
     if (rows[0]) {
-      // Map postgres camelCase/snake_case format to match what Supabase returned
       const row = rows[0];
       res.json({
         id: row.id,
@@ -762,7 +768,7 @@ app.get("/api/v1/admin/policies", authRequired, adminOnly, async (req, res) => {
         business_hours_start: row.business_hours_start,
         business_hours_end: row.business_hours_end,
         require_two_step_sensitive_nodes: !!row.require_two_step_sensitive_nodes,
-        sensitive_node_ids: row.sensitive_node_ids || [],
+        sensitive_node_ids: typeof row.sensitive_node_ids === "string" ? JSON.parse(row.sensitive_node_ids) : (row.sensitive_node_ids || []),
         max_session_duration_by_role: typeof row.max_session_duration_by_role === "string" 
           ? JSON.parse(row.max_session_duration_by_role) 
           : (row.max_session_duration_by_role || { user: 30, admin: 120 })
@@ -811,7 +817,7 @@ app.post("/api/v1/admin/policies", authRequired, adminOnly, async (req, res) => 
 
   try {
     const { rows } = await pool.query(
-      `INSERT INTO admin_access_policies (
+      `INSERT INTO AdminPermissions (
          id, auto_deny_outside_business_hours, business_hours_start, business_hours_end, 
          require_two_step_sensitive_nodes, sensitive_node_ids, max_session_duration_by_role, 
          updated_by, updated_at
@@ -832,7 +838,7 @@ app.post("/api/v1/admin/policies", authRequired, adminOnly, async (req, res) => 
         business_hours_start,
         business_hours_end,
         require_two_step_sensitive_nodes,
-        sensitive_node_ids,
+        JSON.stringify(sensitive_node_ids),
         JSON.stringify(max_session_duration_by_role),
         req.user.id
       ]
@@ -900,8 +906,8 @@ server.on("upgrade", (req, socket, head) => {
         // Log the event
         try {
           await pool.query(
-            "INSERT INTO audit_log (actor_id, action, target, metadata) VALUES ($1, $2, $3, $4)",
-            [null, "session_expired", payload.clientId, { request_id: payload.requestId, reason: "TTL expiration" }]
+            "INSERT INTO ActionLogs (id, actor_id, action, target, metadata) VALUES (gen_random_uuid(), $1, $2, $3, $4)",
+            [null, "session_expired", payload.clientId, JSON.stringify({ request_id: payload.requestId, reason: "TTL expiration" })]
           );
         } catch (dbErr) {
           console.error("Failed to log session expiration to audit log:", dbErr);
