@@ -19,6 +19,12 @@ async function safeInvoke<T>(cmd: string, args?: Record<string, any>): Promise<T
     if (cmd === "get_connection_id") {
       return "2A9-F8C-7E4" as unknown as T;
     }
+    if (cmd === "get_hardware_guid") {
+      return "7c5b81a2-ffaa-4cb4-8a17-640a1b6dfbb2" as unknown as T;
+    }
+    if (cmd === "ping_signaling_server") {
+      return true as unknown as T;
+    }
     if (cmd === "capture_screen") {
       return "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" as unknown as T;
     }
@@ -34,12 +40,15 @@ function App() {
   const [connectionStatus, setConnectionStatus] = useState<"Disconnected" | "Connecting" | "Connected" | "PendingApproval">("Disconnected");
   const [statusMessage, setStatusMessage] = useState("System Idle. Awaiting connection parameters.");
   const [targetId, setTargetId] = useState("");
-  const [hostIp, setHostIp] = useState("localhost");
-  const [port, setPort] = useState(7766);
+  const [hostIp, setHostIp] = useState(() => localStorage.getItem("amphub_gateway_ip") || "localhost");
+  const [port, setPort] = useState(() => Number(localStorage.getItem("amphub_control_port")) || 7766);
+  const [dashboardPort, setDashboardPort] = useState(() => Number(localStorage.getItem("amphub_dashboard_port")) || 3355);
   const [token, setToken] = useState("");
   const [isMock, setIsMock] = useState(true);
   const [myId, setMyId] = useState("Loading...");
   const [remoteScreen, setRemoteScreen] = useState<string | null>(null);
+  const [incomingRequest, setIncomingRequest] = useState<{ ip: string } | null>(null);
+  const [isSignalingServerReachable, setIsSignalingServerReachable] = useState<boolean | null>(null);
   const [logs, setLogs] = useState<string[]>([
     "AMPHUB Core Client initialized.",
     `Mode: ${isTauri ? "Native Tauri Container" : "Standard Browser Environment (Simulation Enabled)"}`
@@ -58,18 +67,50 @@ function App() {
     safeInvoke<string>("get_connection_id")
       .then((id) => {
         setMyId(id);
-        addLog(`Hardware MAC address resolved successfully. Connection ID: ${id}`);
+        addLog(`Hardware GUID hashed successfully. Connection ID: ${id}`);
       })
       .catch((err) => {
         setMyId("AMP-ERR-999");
-        addLog(`Failed to resolve MAC address: ${err}`);
+        addLog(`Failed to resolve Hardware GUID: ${err}`);
       });
   }, []);
+
+  // Persist settings and ping signaling server
+  useEffect(() => {
+    localStorage.setItem("amphub_gateway_ip", hostIp);
+    localStorage.setItem("amphub_control_port", String(port));
+    localStorage.setItem("amphub_dashboard_port", String(dashboardPort));
+
+    const checkPing = async () => {
+      try {
+        const reachable = await safeInvoke<boolean>("ping_signaling_server", { host: hostIp, port: Number(port) });
+        setIsSignalingServerReachable(reachable);
+        addLog(`Signaling server probe to ${hostIp}:${port}: ${reachable ? "REACHABLE" : "UNREACHABLE"}`);
+      } catch (err) {
+        setIsSignalingServerReachable(false);
+      }
+    };
+    checkPing();
+  }, [hostIp, port, dashboardPort]);
+
+  // Handle automatic streaming based on connectionStatus
+  useEffect(() => {
+    if (connectionStatus === "Connected") {
+      safeInvoke("start_desktop_stream")
+        .then(() => addLog("Desktop streamer capture loop active."))
+        .catch(err => addLog(`Failed to start streamer loop: ${err}`));
+    } else if (connectionStatus === "Disconnected") {
+      safeInvoke("stop_desktop_stream")
+        .then(() => addLog("Desktop streamer capture loop stopped."))
+        .catch(err => addLog(`Failed to stop streamer loop: ${err}`));
+    }
+  }, [connectionStatus]);
 
   // Listen to Tauri signaling events
   useEffect(() => {
     let unlistenStatus: (() => void) | null = null;
     let unlistenMessage: (() => void) | null = null;
+    let unlistenStream: (() => void) | null = null;
 
     if (isTauri) {
       listen("connection-status-changed", (event: any) => {
@@ -92,13 +133,27 @@ function App() {
           setRemoteScreen(text);
         } else {
           addLog(`[Signal Message] ${text}`);
+          try {
+            const data = JSON.parse(text);
+            if (data.type === "admin_request" || data.action === "admin_request") {
+              setIncomingRequest({ ip: data.ip || "192.168.9.9" });
+            }
+          } catch(e) {
+            // Not a JSON message, ignore
+          }
         }
       }).then(fn => { unlistenMessage = fn; });
+
+      listen("webrtc-stream-frame", (event: any) => {
+        const b64 = event.payload as string;
+        setRemoteScreen(b64);
+      }).then(fn => { unlistenStream = fn; });
     }
 
     return () => {
       if (unlistenStatus) unlistenStatus();
       if (unlistenMessage) unlistenMessage();
+      if (unlistenStream) unlistenStream();
     };
   }, []);
 
@@ -702,14 +757,91 @@ function App() {
 
           {activeTab === "settings" && (
             <div className="max-w-2xl mx-auto space-y-6">
+              {/* Configuration Inputs Menu */}
               <div className="bg-slate-900/50 rounded-2xl border border-slate-800 p-6 space-y-4">
-                <h3 className="text-base font-extrabold text-white">Client Environment Settings</h3>
+                <h3 className="text-base font-extrabold text-white">Client Setup Configurations</h3>
                 <p className="text-xs text-slate-400">
-                  Configure signaling ports, debug modes, and check host API integrations.
+                  Update your gateway endpoints, access ports, and verify service visibility.
                 </p>
 
                 <div className="space-y-4 pt-3 border-t border-slate-800/80">
-                  {/* App Mode info */}
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Public Gateway IP / Domain</label>
+                    <input
+                      type="text"
+                      value={hostIp}
+                      onChange={(e) => setHostIp(e.target.value)}
+                      placeholder="e.g. localhost or 192.168.9.9"
+                      className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2.5 text-xs font-semibold text-slate-200 focus:outline-none focus:border-rose-500/50 transition-colors"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Control Signal Port</label>
+                      <input
+                        type="number"
+                        value={port}
+                        onChange={(e) => setPort(Number(e.target.value))}
+                        placeholder="7766"
+                        className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2.5 text-xs font-semibold text-slate-200 focus:outline-none focus:border-rose-500/50 transition-colors"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Web Dashboard Port</label>
+                      <input
+                        type="number"
+                        value={dashboardPort}
+                        onChange={(e) => setDashboardPort(Number(e.target.value))}
+                        placeholder="3355"
+                        className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2.5 text-xs font-semibold text-slate-200 focus:outline-none focus:border-rose-500/50 transition-colors"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Signaling Server Reachability status */}
+                  <div className="flex justify-between items-center text-xs pt-2 border-t border-slate-800/40">
+                    <span className="text-slate-400 font-semibold">Signaling Server Probe State:</span>
+                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
+                      isSignalingServerReachable === true ? "bg-emerald-950/60 border border-emerald-900 text-emerald-400" :
+                      isSignalingServerReachable === false ? "bg-rose-950/60 border border-rose-900 text-rose-400" :
+                      "bg-slate-900 border border-slate-800 text-slate-500"
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${
+                        isSignalingServerReachable === true ? "bg-emerald-400" :
+                        isSignalingServerReachable === false ? "bg-rose-400" :
+                        "bg-slate-500"
+                      }`}></span>
+                      {isSignalingServerReachable === true ? "Reachable" :
+                       isSignalingServerReachable === false ? "Unreachable" : "Checking..."}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Simulation Tools */}
+              <div className="bg-slate-900/50 rounded-2xl border border-slate-800 p-6 space-y-4">
+                <h3 className="text-base font-extrabold text-white">Unattended Access Simulation Controls</h3>
+                <p className="text-xs text-slate-400">
+                  Trigger mock authorization requests and verify notification prompts.
+                </p>
+                <div className="flex flex-col gap-2 pt-3 border-t border-slate-800/80">
+                  <button
+                    onClick={() => {
+                      setIncomingRequest({ ip: "192.168.9.9" });
+                      addLog("Triggered mock incoming Admin request from 192.168.9.9.");
+                    }}
+                    className="cursor-pointer py-3 bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white rounded-xl text-xs font-bold shadow-lg transition-all"
+                  >
+                    Simulate Incoming Admin Access Request
+                  </button>
+                </div>
+              </div>
+
+              {/* Debug / Native Diagnostics panel */}
+              <div className="bg-slate-900/50 rounded-2xl border border-slate-800 p-6 space-y-4">
+                <h3 className="text-base font-extrabold text-white">Native API Diagnostics</h3>
+                <div className="space-y-4 pt-3 border-t border-slate-800/80">
                   <div className="flex justify-between items-center text-xs">
                     <span className="text-slate-400 font-semibold">Tauri Platform Sandbox:</span>
                     <span className="font-mono text-slate-300 bg-slate-950 px-2.5 py-1 rounded-md border border-slate-800">
@@ -717,7 +849,6 @@ function App() {
                     </span>
                   </div>
 
-                  {/* Test clipboard */}
                   <div className="pt-2">
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Direct OS Clipboard Interface Test</label>
                     <div className="flex gap-2">
@@ -743,7 +874,6 @@ function App() {
                     </div>
                   </div>
 
-                  {/* Test Screenshot */}
                   <div className="pt-2">
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Direct Monitor Capture Test</label>
                     <button
@@ -791,6 +921,52 @@ function App() {
           )}
         </div>
       </div>
+      {incomingRequest && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-md w-full shadow-2xl relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-[4px] bg-gradient-to-r from-rose-500 to-orange-500 animate-pulse"></div>
+            <div className="flex items-center gap-4 mb-6">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white">Remote Access Request</h3>
+                <p className="text-xs text-slate-500">Incoming administrator connection</p>
+              </div>
+            </div>
+            <p className="text-sm text-slate-300 mb-6 leading-relaxed">
+              An administrator from <span className="font-mono text-rose-400 font-bold bg-slate-950 px-2 py-0.5 rounded border border-slate-800">{incomingRequest.ip}</span> is requesting remote control of your desktop.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => {
+                  setIncomingRequest(null);
+                  addLog("Denied remote access request from " + incomingRequest.ip);
+                }}
+                className="cursor-pointer px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all"
+              >
+                Deny Access
+              </button>
+              <button
+                onClick={() => {
+                  const ip = incomingRequest.ip;
+                  setIncomingRequest(null);
+                  addLog("Approved remote access request from " + ip);
+                  setConnectionStatus("Connected");
+                  setStatusMessage("Admin control session active from " + ip);
+                  safeInvoke("start_desktop_stream");
+                  setRemoteScreen("mock");
+                }}
+                className="cursor-pointer px-5 py-2.5 bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-rose-950 transition-all"
+              >
+                Approve & Connect
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

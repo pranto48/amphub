@@ -6,9 +6,11 @@ use mac_address::get_mac_address;
 use sha2::{Sha256, Digest};
 use enigo::{Enigo, MouseControllable, KeyboardControllable, MouseButton, Key};
 use arboard::Clipboard;
+use std::time::Duration;
 use screenshots::Screen;
 
 mod signaling;
+mod streamer;
 
 use signaling::{
     SignalingState,
@@ -16,6 +18,12 @@ use signaling::{
     disconnect_signaling,
     start_signaling_connection,
     ConnectionStatus,
+};
+
+use streamer::{
+    StreamerState,
+    start_desktop_stream,
+    stop_desktop_stream,
 };
 
 #[derive(serde::Deserialize)]
@@ -33,28 +41,57 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+#[cfg(target_os = "windows")]
+fn get_machine_guid() -> Result<String, String> {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let crypto = hklm.open_subkey("SOFTWARE\\Microsoft\\Cryptography").map_err(|e| e.to_string())?;
+    let guid: String = crypto.get_value("MachineGuid").map_err(|e| e.to_string())?;
+    Ok(guid)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn get_machine_guid() -> Result<String, String> {
+    // Stable mockup GUID for non-windows platforms (e.g. mac/linux testing)
+    Ok("7c5b81a2-ffaa-4cb4-8a17-640a1b6dfbb2".to_string())
+}
+
+#[tauri::command]
+fn get_hardware_guid() -> String {
+    match get_machine_guid() {
+        Ok(guid) => guid.to_uppercase(),
+        Err(_) => "7C5B81A2-FFAA-4CB4-8A17-640A1B6DFBB2".to_string()
+    }
+}
+
 #[tauri::command]
 fn get_connection_id() -> String {
-    match get_mac_address() {
-        Ok(Some(mac)) => {
-            let mut hasher = Sha256::new();
-            hasher.update(mac.bytes());
-            let result = hasher.finalize();
-            let hex_str = format!("{:x}", result);
-            // Format first 9 hex digits as "XXX-XXX-XXX"
-            if hex_str.len() >= 9 {
-                let part1 = &hex_str[0..3];
-                let part2 = &hex_str[3..6];
-                let part3 = &hex_str[6..9];
-                format!("{}-{}-{}", part1, part2, part3).to_uppercase()
-            } else {
-                "AMP-776-633".to_string()
-            }
-        }
-        _ => {
-            // Generates a stable fallback based on computer name or environment
-            "AMP-776-633".to_string()
-        }
+    let guid = get_hardware_guid();
+    let mut hasher = Sha256::new();
+    hasher.update(guid.as_bytes());
+    let result = hasher.finalize();
+    let hex_str = format!("{:x}", result);
+    // Format first 9 hex digits as "XXX-XXX-XXX"
+    if hex_str.len() >= 9 {
+        let part1 = &hex_str[0..3];
+        let part2 = &hex_str[3..6];
+        let part3 = &hex_str[6..9];
+        format!("{}-{}-{}", part1, part2, part3).to_uppercase()
+    } else {
+        "AMP-776-633".to_string()
+    }
+}
+
+#[tauri::command]
+async fn ping_signaling_server(host: String, port: u16) -> bool {
+    let addr = format!("{}:{}", host, port);
+    match tokio::time::timeout(
+        Duration::from_millis(1500),
+        tokio::net::TcpStream::connect(&addr)
+    ).await {
+        Ok(Ok(_)) => true,
+        _ => false,
     }
 }
 
@@ -137,10 +174,12 @@ fn set_clipboard(text: String) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(SignalingState::new())
+        .manage(StreamerState::new())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             greet,
             get_connection_id,
+            get_hardware_guid,
             simulate_input,
             capture_screen,
             get_clipboard,
@@ -148,6 +187,9 @@ pub fn run() {
             get_connection_status,
             disconnect_signaling,
             start_signaling_connection,
+            ping_signaling_server,
+            start_desktop_stream,
+            stop_desktop_stream,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

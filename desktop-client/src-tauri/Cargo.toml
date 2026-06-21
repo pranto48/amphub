@@ -31,4 +31,5 @@ arboard = "3.3"
 screenshots = "0.8.5"
 base64 = "0.21"
 futures-util = "0.3"
+winreg = "0.52"
 
