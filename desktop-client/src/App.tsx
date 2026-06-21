@@ -48,10 +48,13 @@ function App() {
   const [myId, setMyId] = useState("Loading...");
   const [remoteScreen, setRemoteScreen] = useState<string | null>(null);
   const [incomingRequest, setIncomingRequest] = useState<{ ip: string; token?: string; requestId?: string } | null>(null);
+  const [remoteStreamObject, setRemoteStreamObject] = useState<MediaStream | null>(null);
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
   const [isSignalingServerReachable, setIsSignalingServerReachable] = useState<boolean | null>(null);
   const [logs, setLogs] = useState<string[]>([
     "AMPHUB Core Client initialized.",
-    `Mode: ${isTauri ? "Native Tauri Container" : "Standard Browser Environment (Simulation Enabled)"}`
+    `Mode: ${isTauri ? "AMPHUB Windows Client" : "Standard Browser Environment (Simulation Enabled)"}`
   ]);
   const [clipboardText, setClipboardText] = useState("");
   const [simulatedTermInput, setSimulatedTermInput] = useState("");
@@ -68,6 +71,115 @@ function App() {
       clearInterval(pollingRef.current);
       pollingRef.current = null;
     }
+  };
+
+  const closePeerConnection = () => {
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current = null;
+    }
+    setRemoteStreamObject(null);
+  };
+
+  const getLocalStream = async (): Promise<MediaStream> => {
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+        return await navigator.mediaDevices.getDisplayMedia({ video: true });
+      }
+    } catch (e) {
+      console.warn("getDisplayMedia failed, falling back to canvas-based stream capture", e);
+    }
+    
+    const canvas = document.createElement("canvas");
+    canvas.width = 1280;
+    canvas.height = 720;
+    const ctx = canvas.getContext("2d");
+    
+    const img = new Image();
+    const updateCanvas = async () => {
+      try {
+        if (isTauri) {
+          const b64 = await safeInvoke<string>("capture_screen");
+          img.src = `data:image/png;base64,${b64}`;
+          img.onload = () => {
+            ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+          };
+        } else {
+          if (ctx) {
+            ctx.fillStyle = "#1e293b";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "#ef4444";
+            ctx.font = "bold 30px sans-serif";
+            ctx.fillText(`AMPHUB Streaming from ${myId}`, 100, 100);
+            ctx.fillStyle = "#94a3b8";
+            ctx.font = "20px monospace";
+            ctx.fillText(`Timestamp: ${new Date().toLocaleTimeString()}`, 100, 150);
+          }
+        }
+      } catch (err) {
+        // ignore
+      }
+    };
+    
+    const intervalId = setInterval(updateCanvas, 200);
+    const stream = (canvas as any).captureStream(10); // 10 fps
+    stream.getTracks().forEach((track: any) => {
+      const originalStop = track.stop;
+      track.stop = () => {
+        clearInterval(intervalId);
+        if (originalStop) originalStop.call(track);
+      };
+    });
+    return stream;
+  };
+
+  const initiateWebRTCOffer = async () => {
+    addLog(`[WebRTC] Initiating P2P stream connection to host: ${targetId}`);
+    closePeerConnection();
+    
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    });
+    peerConnectionRef.current = pc;
+
+    pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        safeInvoke("send_signaling_message", {
+          message: JSON.stringify({
+            type: "ice-candidate",
+            target: targetId,
+            sender: myId,
+            candidate: e.candidate
+          })
+        });
+      }
+    };
+
+    pc.ontrack = (event) => {
+      addLog("[WebRTC] Received remote stream track successfully!");
+      if (event.streams && event.streams[0]) {
+        setRemoteStreamObject(event.streams[0]);
+      }
+    };
+
+    pc.addTransceiver("video", { direction: "recvonly" });
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    safeInvoke("send_signaling_message", {
+      message: JSON.stringify({
+        type: "offer",
+        target: targetId,
+        sender: myId,
+        offer: offer
+      })
+    });
+    addLog(`[WebRTC] Sent SDP Offer to host: ${targetId}`);
   };
 
   // Initialize client ID
@@ -124,12 +236,19 @@ function App() {
       safeInvoke("start_desktop_stream")
         .then(() => addLog("Desktop streamer capture loop active."))
         .catch(err => addLog(`Failed to start streamer loop: ${err}`));
+      
+      // If we are the controller, initiate WebRTC offer
+      if (targetId && targetId !== myId) {
+        initiateWebRTCOffer();
+      }
     } else if (connectionStatus === "Disconnected") {
       safeInvoke("stop_desktop_stream")
         .then(() => addLog("Desktop streamer capture loop stopped."))
         .catch(err => addLog(`Failed to stop streamer loop: ${err}`));
+      
+      closePeerConnection();
     }
-  }, [connectionStatus]);
+  }, [connectionStatus, targetId, myId]);
 
   // Listen to Tauri signaling events
   useEffect(() => {
@@ -151,13 +270,12 @@ function App() {
         }
       }).then(fn => { unlistenStatus = fn; });
 
-      listen("session-message", (event: any) => {
+      listen("session-message", async (event: any) => {
         const text = event.payload as string;
-        if (text.startsWith("iVBOR") || text.length > 500) {
+        if (text.startsWith("iVBOR") || text.length > 500 && !text.startsWith("{")) {
           // Received frame base64
           setRemoteScreen(text);
         } else {
-          addLog(`[Signal Message] ${text}`);
           try {
             const data = JSON.parse(text);
             if (data.type === "admin_request" || data.action === "admin_request") {
@@ -166,9 +284,68 @@ function App() {
                 token: data.token,
                 requestId: data.requestId
               });
+            } else if (data.type === "offer") {
+              addLog(`[WebRTC] Received SDP Offer from controller: ${data.sender}`);
+              closePeerConnection();
+              
+              const pc = new RTCPeerConnection({
+                iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+              });
+              peerConnectionRef.current = pc;
+
+              pc.onicecandidate = (e) => {
+                if (e.candidate) {
+                  safeInvoke("send_signaling_message", {
+                    message: JSON.stringify({
+                      type: "ice-candidate",
+                      target: data.sender,
+                      sender: myId,
+                      candidate: e.candidate
+                    })
+                  });
+                }
+              };
+
+              try {
+                const stream = await getLocalStream();
+                localStreamRef.current = stream;
+                stream.getTracks().forEach(track => pc.addTrack(track, stream));
+                addLog("[WebRTC] Local screen stream tracks added using .addTrack()");
+              } catch (streamErr) {
+                addLog(`[WebRTC] Failed to capture screen: ${streamErr}`);
+              }
+
+              await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+              const answer = await pc.createAnswer();
+              await pc.setLocalDescription(answer);
+
+              safeInvoke("send_signaling_message", {
+                message: JSON.stringify({
+                  type: "answer",
+                  target: data.sender,
+                  sender: myId,
+                  answer: answer
+                })
+              });
+              addLog(`[WebRTC] Sent SDP Answer to controller: ${data.sender}`);
+            } else if (data.type === "answer") {
+              addLog(`[WebRTC] Received SDP Answer from host: ${data.sender}`);
+              if (peerConnectionRef.current) {
+                await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+              }
+            } else if (data.type === "ice-candidate") {
+              if (peerConnectionRef.current) {
+                await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+              }
+            } else if (data.type === "error") {
+              addLog(`[Signaling Error] ${data.error}`);
             }
           } catch(e) {
-            // Not a JSON message, ignore
+            if (text.startsWith("iVBOR") || text.length > 500) {
+              setRemoteScreen(text);
+            } else {
+              addLog(`[Signal Message] ${text}`);
+            }
           }
         }
       }).then(fn => { unlistenMessage = fn; });
@@ -184,6 +361,7 @@ function App() {
       if (unlistenMessage) unlistenMessage();
       if (unlistenStream) unlistenStream();
       clearPolling();
+      closePeerConnection();
     };
   }, []);
 
@@ -670,7 +848,8 @@ function App() {
                       <div className="pt-4">
                         <button
                           onClick={handleConnect}
-                          className="w-full cursor-pointer py-3.5 bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-rose-950/50 hover:shadow-rose-900/60 transform active:scale-[0.99] transition-all flex items-center justify-center gap-2 group"
+                          disabled={!isMock && isSignalingServerReachable === false}
+                          className={`w-full cursor-pointer py-3.5 bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-rose-950/50 hover:shadow-rose-900/60 transform active:scale-[0.99] transition-all flex items-center justify-center gap-2 group ${(!isMock && isSignalingServerReachable === false) ? "opacity-50 cursor-not-allowed" : ""}`}
                         >
                           <svg className="w-5 h-5 transition-transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
@@ -849,6 +1028,19 @@ function App() {
                             </div>
                           </div>
                         </div>
+                      ) : remoteStreamObject ? (
+                        <video
+                          ref={(el) => {
+                            if (el && el.srcObject !== remoteStreamObject) {
+                              el.srcObject = remoteStreamObject;
+                              el.play().catch(err => console.error("Video play failed", err));
+                            }
+                          }}
+                          className="w-full h-full object-contain"
+                          autoPlay
+                          playsInline
+                          muted
+                        />
                       ) : remoteScreen ? (
                         /* Real captured image stream */
                         <img 
@@ -995,9 +1187,9 @@ function App() {
                 <h3 className="text-base font-extrabold text-white">Native API Diagnostics</h3>
                 <div className="space-y-4 pt-3 border-t border-slate-800/80">
                   <div className="flex justify-between items-center text-xs">
-                    <span className="text-slate-400 font-semibold">Tauri Platform Sandbox:</span>
+                    <span className="text-slate-400 font-semibold">AMPHUB Client Sandbox:</span>
                     <span className="font-mono text-slate-300 bg-slate-950 px-2.5 py-1 rounded-md border border-slate-800">
-                      {isTauri ? "Windows Native MSVC" : "Vite Dev Server (Web)"}
+                      {isTauri ? "Windows Native x64" : "Vite Dev Server (Web)"}
                     </span>
                   </div>
 

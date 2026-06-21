@@ -103,6 +103,23 @@ app.use(cors({ origin: CORS_ORIGIN }));
 app.use(express.json({ limit: "1mb" }));
 
 // ---------- helpers ----------
+function isSameClassCSubnet(ipA, ipB) {
+  if (!ipA || !ipB) return false;
+  if (ipA === ipB) return true;
+  
+  const isLoopback = (ip) => ip === "127.0.0.1" || ip === "::1" || ip === "localhost";
+  if (isLoopback(ipA) && isLoopback(ipB)) return true;
+
+  const partsA = ipA.split(".");
+  const partsB = ipB.split(".");
+  if (partsA.length === 4 && partsB.length === 4) {
+    return partsA[0] === partsB[0] && 
+           partsA[1] === partsB[1] && 
+           partsA[2] === partsB[2];
+  }
+  return false;
+}
+
 function logSecurityEvent(actorId, action, target, metadata = {}) {
   const logEvent = {
     timestamp: new Date().toISOString(),
@@ -491,24 +508,26 @@ app.post("/api/v1/sessions/request", async (req, res) => {
     requestedAt: new Date().toISOString()
   };
 
-  const isLocalIp = (ip) => {
-    if (!ip) return false;
-    if (ip === "127.0.0.1" || ip === "::1" || ip === "localhost") return true;
-    const parts = ip.split(".");
-    if (parts.length === 4) {
-      const first = parseInt(parts[0], 10);
-      const second = parseInt(parts[1], 10);
-      if (first === 10) return true;
-      if (first === 172 && (second >= 16 && second <= 31)) return true;
-      if (first === 192 && second === 168) return true;
+  // Find target host IP
+  let targetIp = "127.0.0.1";
+  for (const ws of signalingSockets) {
+    if (ws.clientId === clientId) {
+      targetIp = ws.remoteIp || "127.0.0.1";
+      break;
     }
-    if (ip.startsWith("fe80:") || ip.startsWith("fc00:") || ip.startsWith("fd00:")) return true;
-    return false;
-  };
+  }
+  if (targetIp === "127.0.0.1") {
+    const node = await prisma.desktopNode.findFirst({
+      where: { remoteId: clientId }
+    });
+    if (node) {
+      targetIp = node.localIp;
+    }
+  }
 
   try {
-    if (isLocalIp(clientIp)) {
-      // Auto-approve local IP connection requests
+    if (isSameClassCSubnet(clientIp, targetIp)) {
+      // Auto-approve local IP connection requests instantly
       const approvedAt = new Date();
       const T_expiry_seconds = Math.floor(approvedAt.getTime() / 1000) + (60 * 60); // 1 hour TTL
       const expiresAt = new Date(T_expiry_seconds * 1000);
@@ -547,7 +566,7 @@ app.post("/api/v1/sessions/request", async (req, res) => {
         token: session.token
       };
 
-      logSecurityEvent(null, "session_auto_approve_local", clientId, { ip: clientIp });
+      logSecurityEvent(null, "session_auto_approve_local", clientId, { ip: clientIp, targetIp });
       broadcast({ table: "RemoteSessions", type: "INSERT", row });
 
       // Notify the standby host client immediately
@@ -567,12 +586,12 @@ app.post("/api/v1/sessions/request", async (req, res) => {
       return res.json(row);
     }
 
-    // Default flow: outside IP requires manual administrator approval
+    // Default flow: outside IP (WAN) requires administrator approval. State: PENDING_ADMIN
     const session = await prisma.remoteSession.create({
       data: {
         clientId,
         metadata: JSON.stringify(enrichedMetadata),
-        status: "PENDING"
+        status: "PENDING_ADMIN"
       }
     });
     const row = {
@@ -585,8 +604,17 @@ app.post("/api/v1/sessions/request", async (req, res) => {
       expires_at: session.expiresAt,
       token: session.token
     };
-    logSecurityEvent(null, "session_request", clientId, { ip: clientIp });
+    logSecurityEvent(null, "session_request_wan", clientId, { ip: clientIp, targetIp });
     broadcast({ table: "RemoteSessions", type: "INSERT", row });
+    
+    // Push WebSocket notification to Web Dashboard (port 3355)
+    broadcast({
+      type: "CONNECTION_REQUEST_MODAL",
+      requestId: session.id,
+      clientId: session.clientId,
+      metadata: enrichedMetadata
+    });
+    
     res.json(row);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -611,7 +639,7 @@ app.post("/api/v1/sessions/approve", authRequired, adminOnly, async (req, res) =
     if (!sessionReq) {
       return res.status(404).json({ error: "Session request not found" });
     }
-    if (sessionReq.status !== "PENDING") {
+    if (sessionReq.status !== "PENDING" && sessionReq.status !== "PENDING_ADMIN") {
       return res.status(400).json({ error: `Session request is already ${sessionReq.status}` });
     }
 
@@ -689,7 +717,11 @@ app.post("/api/v1/sessions/approve", authRequired, adminOnly, async (req, res) =
 app.get("/api/v1/sessions/pending", authRequired, adminOnly, async (req, res) => {
   try {
     const sessions = await prisma.remoteSession.findMany({
-      where: { status: "PENDING" },
+      where: {
+        status: {
+          in: ["PENDING", "PENDING_ADMIN"]
+        }
+      },
       orderBy: { requestedAt: "desc" }
     });
     const rows = sessions.map(s => ({
@@ -770,7 +802,7 @@ app.post("/api/v1/sessions/deny", authRequired, adminOnly, async (req, res) => {
     if (!sessionReq) {
       return res.status(404).json({ error: "Session request not found" });
     }
-    if (sessionReq.status !== "PENDING") {
+    if (sessionReq.status !== "PENDING" && sessionReq.status !== "PENDING_ADMIN") {
       return res.status(400).json({ error: `Session request is already ${sessionReq.status}` });
     }
 
@@ -1580,8 +1612,17 @@ signalingServer.on("upgrade", async (req, socket, head) => {
         ws.clientId = myId;
         ws.isHost = true;
         ws.isStandby = true;
+        ws.uniqueClientId = myId;
+        
+        const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
+        let parsedIp = rawIp.split(",")[0].trim();
+        if (parsedIp.includes("::ffff:")) {
+          parsedIp = parsedIp.split("::ffff:")[1];
+        }
+        ws.remoteIp = parsedIp;
+        
         signalingSockets.add(ws);
-        console.log(`[STANDBY] Client ${myId} connected as standby host.`);
+        console.log(`[STANDBY] Client ${myId} connected as standby host from ${parsedIp}.`);
 
         ws.on("close", () => {
           signalingSockets.delete(ws);
@@ -1633,7 +1674,7 @@ signalingServer.on("upgrade", async (req, socket, head) => {
             data: {
               id: payload.requestId,
               clientId: payload.clientId || "unknown-client",
-              status: "PENDING",
+              status: "PENDING_ADMIN",
               metadata: JSON.stringify({ clientIp: req.socket.remoteAddress || "127.0.0.1", requestedAt: new Date().toISOString() })
             }
           });
@@ -1675,15 +1716,23 @@ signalingServer.on("upgrade", async (req, socket, head) => {
     ws.clientId = payload.clientId;
     ws.token = token;
     ws.myId = myId;
+    ws.uniqueClientId = myId;
+
+    const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
+    let parsedIp = rawIp.split(",")[0].trim();
+    if (parsedIp.includes("::ffff:")) {
+      parsedIp = parsedIp.split("::ffff:")[1];
+    }
+    ws.remoteIp = parsedIp;
 
     if (myId === payload.clientId) {
       ws.isHost = true;
       ws.isController = false;
-      console.log(`[SESSION] Host ${myId} joined active session ${payload.requestId}`);
+      console.log(`[SESSION] Host ${myId} joined active session ${payload.requestId} from ${parsedIp}`);
     } else {
       ws.isHost = false;
       ws.isController = true;
-      console.log(`[SESSION] Controller ${myId} joined active session ${payload.requestId}`);
+      console.log(`[SESSION] Controller ${myId} joined active session ${payload.requestId} from ${parsedIp}`);
     }
 
     const remainingMs = (payload.exp * 1000) - Date.now();
@@ -1714,18 +1763,53 @@ signalingServer.on("upgrade", async (req, socket, head) => {
       }
     }, remainingMs);
 
-    // Bidirectional Message Forwarding
+    // Bidirectional Message Forwarding & Targeted Routing for WebRTC
     ws.on("message", (data) => {
       try {
         const messageString = data.toString();
-        // Forward message to peer in the same session
+        let messageObj = null;
+        try {
+          messageObj = JSON.parse(messageString);
+        } catch (e) {
+          // Ignore parse errors
+        }
+
+        if (messageObj && ["offer", "answer", "ice-candidate"].includes(messageObj.type)) {
+          const targetClientId = messageObj.target || messageObj.targetId;
+          if (!targetClientId) {
+            ws.send(JSON.stringify({ type: "error", error: "Target Client ID is required for signaling" }));
+            return;
+          }
+
+          // Find target client socket strictly by Client ID
+          let targetWs = null;
+          for (const peer of signalingSockets) {
+            if (peer.uniqueClientId === targetClientId) {
+              targetWs = peer;
+              break;
+            }
+          }
+
+          if (targetWs) {
+            // Route exclusively to targetWs, do not reflect back or broadcast
+            targetWs.send(messageString);
+          } else {
+            // Target client B is not connected, reject connection and notify client A
+            ws.send(JSON.stringify({
+              type: "error",
+              error: `Target client ${targetClientId} is not connected to the signaling server`,
+              target: targetClientId
+            }));
+          }
+          return;
+        }
+
+        // Fallback for non-WebRTC control messages or image capture events
         for (const peer of signalingSockets) {
           if (peer !== ws && peer.requestId === ws.requestId) {
             if (ws.isHost && peer.isController) {
-              // Host (screen capture frame) -> Controller
               peer.send(messageString);
             } else if (ws.isController && peer.isHost) {
-              // Controller (input simulation action) -> Host
               peer.send(messageString);
             }
           }
