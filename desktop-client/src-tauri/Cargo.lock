@@ -829,6 +829,7 @@ dependencies = [
  "arboard",
  "base64 0.21.7",
  "enigo",
+ "futures-util",
  "mac_address",
  "screenshots",
  "serde",
