@@ -40,7 +40,7 @@ function App() {
   const [connectionStatus, setConnectionStatus] = useState<"Disconnected" | "Connecting" | "Connected" | "PendingApproval">("Disconnected");
   const [statusMessage, setStatusMessage] = useState("System Idle. Awaiting connection parameters.");
   const [targetId, setTargetId] = useState("");
-  const [hostIp, setHostIp] = useState(() => localStorage.getItem("amphub_gateway_ip") || "localhost");
+  const [hostIp, setHostIp] = useState(() => localStorage.getItem("amphub_gateway_ip") || "192.168.9.9");
   const [port, setPort] = useState(() => Number(localStorage.getItem("amphub_control_port")) || 7766);
   const [dashboardPort, setDashboardPort] = useState(() => Number(localStorage.getItem("amphub_dashboard_port")) || 3355);
   const [token, setToken] = useState("");
