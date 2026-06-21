@@ -193,6 +193,12 @@ function App() {
   };
 
   const handleConnect = async () => {
+    if (!isMock && isSignalingServerReachable === false) {
+      addLog("Error: Cannot connect to target. AMPHUB signaling server is unreachable.");
+      setStatusMessage("Offline: Server connection required.");
+      return;
+    }
+
     try {
       addLog(`Initiating connection. Target: ${targetId}, Endpoint: ${hostIp}:${port}`);
       
@@ -253,6 +259,19 @@ function App() {
         }
 
         const sessionRequest = await response.json();
+        if (sessionRequest.status === "APPROVED" && sessionRequest.token) {
+          clearPolling();
+          addLog("Local connection auto-approved by server. Connecting directly...");
+          setToken(sessionRequest.token);
+          await safeInvoke("start_signaling_connection", {
+            host: hostIp,
+            port: Number(port),
+            token: sessionRequest.token,
+            isMock: false
+          });
+          return;
+        }
+
         const requestId = sessionRequest.id;
         addLog(`Session request created. ID: ${requestId}. Status: ${sessionRequest.status}`);
         setConnectionStatus("PendingApproval");
@@ -445,10 +464,17 @@ function App() {
               <div className="absolute top-0 right-0 w-24 h-24 bg-rose-500/5 rounded-full blur-xl pointer-events-none"></div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[10px] font-bold tracking-wider text-slate-500 uppercase">Your Client ID</span>
-                <span className="flex items-center gap-1.5 bg-emerald-950/80 border border-emerald-900 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
-                  Ready
-                </span>
+                {(!isMock && isSignalingServerReachable === false) ? (
+                  <span className="flex items-center gap-1.5 bg-rose-950/80 border border-rose-900 text-rose-400 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                    Offline
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5 bg-emerald-950/80 border border-emerald-900 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+                    Ready
+                  </span>
+                )}
               </div>
               <div className="text-2xl font-black font-mono tracking-wider text-slate-200 select-all py-1">
                 {myId}
@@ -519,12 +545,6 @@ function App() {
 
         {/* Footer */}
         <div className="p-6 border-t border-slate-800/60 bg-slate-950/20 text-xs text-slate-500 font-medium">
-          <div className="flex justify-between items-center mb-1">
-            <span>Tauri Backend Engine</span>
-            <span className={isTauri ? "text-emerald-400" : "text-amber-400"}>
-              {isTauri ? "Connected" : "Simulated"}
-            </span>
-          </div>
           <div>v2.11.3 • Windows x64</div>
         </div>
       </div>
@@ -573,7 +593,7 @@ function App() {
                       {/* Host IP and Port in Grid */}
                       <div className="grid grid-cols-3 gap-4">
                         <div className="col-span-2">
-                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Signaling Host IP</label>
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">AMPHUB Server Address</label>
                           <input
                             type="text"
                             value={hostIp}
@@ -898,7 +918,7 @@ function App() {
 
                 <div className="space-y-4 pt-3 border-t border-slate-800/80">
                   <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Public Gateway IP / Domain</label>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">AMPHUB Server Address</label>
                     <input
                       type="text"
                       value={hostIp}

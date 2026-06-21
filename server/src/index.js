@@ -480,7 +480,10 @@ app.post("/api/v1/sessions/request", async (req, res) => {
   const { clientId, metadata = {} } = parsed.data;
   
   const clientIpRaw = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
-  const clientIp = clientIpRaw.includes("::ffff:") ? clientIpRaw.split("::ffff:")[1] : clientIpRaw;
+  let clientIp = clientIpRaw.split(",")[0].trim();
+  if (clientIp.includes("::ffff:")) {
+    clientIp = clientIp.split("::ffff:")[1];
+  }
   
   const enrichedMetadata = {
     ...metadata,
@@ -488,7 +491,83 @@ app.post("/api/v1/sessions/request", async (req, res) => {
     requestedAt: new Date().toISOString()
   };
 
+  const isLocalIp = (ip) => {
+    if (!ip) return false;
+    if (ip === "127.0.0.1" || ip === "::1" || ip === "localhost") return true;
+    const parts = ip.split(".");
+    if (parts.length === 4) {
+      const first = parseInt(parts[0], 10);
+      const second = parseInt(parts[1], 10);
+      if (first === 10) return true;
+      if (first === 172 && (second >= 16 && second <= 31)) return true;
+      if (first === 192 && second === 168) return true;
+    }
+    if (ip.startsWith("fe80:") || ip.startsWith("fc00:") || ip.startsWith("fd00:")) return true;
+    return false;
+  };
+
   try {
+    if (isLocalIp(clientIp)) {
+      // Auto-approve local IP connection requests
+      const approvedAt = new Date();
+      const T_expiry_seconds = Math.floor(approvedAt.getTime() / 1000) + (60 * 60); // 1 hour TTL
+      const expiresAt = new Date(T_expiry_seconds * 1000);
+      const requestId = crypto.randomUUID();
+      
+      const token = jwt.sign(
+        {
+          type: "session",
+          requestId: requestId,
+          clientId: clientId,
+          exp: T_expiry_seconds
+        },
+        JWT_SECRET
+      );
+
+      const session = await prisma.remoteSession.create({
+        data: {
+          id: requestId,
+          clientId,
+          metadata: JSON.stringify(enrichedMetadata),
+          status: "APPROVED",
+          approvedAt,
+          expiresAt,
+          token
+        }
+      });
+
+      const row = {
+        id: session.id,
+        client_id: session.clientId,
+        status: session.status,
+        metadata: enrichedMetadata,
+        requested_at: session.requestedAt,
+        approved_at: session.approvedAt,
+        expires_at: session.expiresAt,
+        token: session.token
+      };
+
+      logSecurityEvent(null, "session_auto_approve_local", clientId, { ip: clientIp });
+      broadcast({ table: "RemoteSessions", type: "INSERT", row });
+
+      // Notify the standby host client immediately
+      for (const ws of signalingSockets) {
+        if (ws.isHost && ws.isStandby && ws.clientId === clientId) {
+          ws.send(JSON.stringify({
+            type: "admin_request",
+            action: "admin_request",
+            ip: clientIp,
+            token: token,
+            requestId: requestId
+          }));
+          console.log(`[AUTO-APPROVE] Sent approval admin_request payload to standby host ${ws.clientId}`);
+        }
+      }
+
+      return res.json(row);
+    }
+
+    // Default flow: outside IP requires manual administrator approval
     const session = await prisma.remoteSession.create({
       data: {
         clientId,
