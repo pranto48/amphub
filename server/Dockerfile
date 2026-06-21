@@ -38,7 +38,7 @@ COPY server/src ./src
 # Set runtime user
 USER amphub
 
-EXPOSE 4000
+EXPOSE 3355 7766
 
 # Run the backend app
 CMD ["node", "src/index.js"]

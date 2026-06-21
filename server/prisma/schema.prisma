@@ -1,0 +1,88 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  displayName  String?  @map("display_name")
+  role         String   @default("user")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("Users")
+}
+
+model RemoteSession {
+  id          String    @id @default(uuid())
+  clientId    String    @map("client_id")
+  status      String    @default("PENDING")
+  metadata    String    @default("{}")
+  requestedAt DateTime  @default(now()) @map("requested_at")
+  approvedAt  DateTime? @map("approved_at")
+  expiresAt   DateTime? @map("expires_at")
+  token       String?
+
+  @@map("RemoteSessions")
+}
+
+model ActionLog {
+  id        String   @id @default(uuid())
+  actorId   String?  @map("actor_id")
+  action    String
+  target    String?
+  metadata  String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("ActionLogs")
+}
+
+model AdminPermission {
+  id                           String   @id @default("00000000-0000-0000-0000-000000000001")
+  autoDenyOutsideBusinessHours Boolean  @default(false) @map("auto_deny_outside_business_hours")
+  businessHoursStart           String   @default("08:00") @map("business_hours_start")
+  businessHoursEnd             String   @default("18:00") @map("business_hours_end")
+  requireTwoStepSensitiveNodes Boolean  @default(false) @map("require_two_step_sensitive_nodes")
+  sensitiveNodeIds             String   @default("[]") @map("sensitive_node_ids")
+  maxSessionDurationByRole     String   @default("{\"user\":30,\"admin\":120}") @map("max_session_duration_by_role")
+  updatedBy                    String?  @map("updated_by")
+  updatedAt                    DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("AdminPermissions")
+}
+
+model DesktopNode {
+  id                 String    @id @default(uuid())
+  name               String
+  remoteId           String    @map("remote_id")
+  localIp            String    @map("local_ip")
+  os                 String    @default("windows")
+  status             String    @default("offline")
+  lastSeen           DateTime? @map("last_seen")
+  masterPasswordHash String?   @map("master_password_hash")
+  ownerId            String?   @map("owner_id")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  @@map("desktop_nodes")
+}
+
+model AccessRequest {
+  id           String    @id @default(uuid())
+  nodeId       String    @map("node_id")
+  requesterId  String    @map("requester_id")
+  status       String    @default("pending")
+  requestedAt  DateTime  @default(now()) @map("requested_at")
+  decidedAt    DateTime? @map("decided_at")
+  decidedBy    String?   @map("decided_by")
+  sessionToken String?   @map("session_token")
+  expiresAt    DateTime? @map("expires_at")
+
+  @@map("access_requests")
+}
