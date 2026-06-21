@@ -181,7 +181,7 @@ pub async fn start_signaling_connection(
                 }
 
                 match connect_async(&ws_url).await {
-                    Ok((ws_stream, response)) => {
+                    Ok((ws_stream, _response)) => {
                         {
                             let mut s = status_clone.lock().await;
                             *s = ConnectionStatus::Connected;
@@ -201,8 +201,6 @@ pub async fn start_signaling_connection(
                         }
 
                         // Spawn writer loop
-                        let mut app_writer = app.clone();
-                        let mut stop_rx_writer = ws_tx_clone.clone();
                         tokio::spawn(async move {
                             while let Some(msg_str) = rx.recv().await {
                                 if write.send(Message::Text(msg_str)).await.is_err() {

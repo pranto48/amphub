@@ -1,8 +1,4 @@
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use tauri::{State, AppHandle, Emitter};
 use base64::{Engine as _, engine::general_purpose};
-use mac_address::get_mac_address;
 use sha2::{Sha256, Digest};
 use enigo::{Enigo, MouseControllable, KeyboardControllable, MouseButton, Key};
 use arboard::Clipboard;
@@ -18,7 +14,6 @@ use signaling::{
     disconnect_signaling,
     start_signaling_connection,
     send_signaling_message,
-    ConnectionStatus,
 };
 
 use streamer::{
@@ -97,7 +92,7 @@ async fn ping_signaling_server(host: String, port: u16) -> bool {
 }
 
 #[tauri::command]
-pub fn simulate_input(action: InputAction) -> Result<(), String> {
+fn simulate_input(action: InputAction) -> Result<(), String> {
     let mut enigo = Enigo::new();
     match action {
         InputAction::MouseMove { x, y } => {
