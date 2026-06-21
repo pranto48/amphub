@@ -4,7 +4,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Install native dependencies for compiling better-sqlite3
-RUN apk add --no-cache build-base python3
+RUN apk add --no-cache build-base python3 openssl
 
 COPY server/package.json server/package-lock.json* ./
 COPY server/prisma ./prisma
@@ -19,6 +19,8 @@ RUN echo "$GIT_SHA" > git-sha.txt
 FROM node:20-alpine AS runner
 
 WORKDIR /app
+
+RUN apk add --no-cache openssl
 
 # Create a non-root user and group with predefined UID/GID (10001)
 RUN addgroup -g 10001 -S amphubgroup && \
