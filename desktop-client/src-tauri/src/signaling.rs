@@ -197,8 +197,12 @@ pub async fn start_signaling_connection(
                         // Store tx handle to let other commands send messages
                         {
                             let mut ws_tx_lock = ws_tx_clone.lock().await;
-                            *ws_tx_lock = Some(tx);
+                            *ws_tx_lock = Some(tx.clone());
                         }
+
+                        // Send registration handshake immediately
+                        let register_msg = format!("{{\"type\":\"register\",\"clientId\":\"{}\"}}", my_id);
+                        let _ = tx.send(register_msg).await;
 
                         // Spawn writer loop
                         tokio::spawn(async move {

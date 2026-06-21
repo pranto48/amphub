@@ -510,13 +510,10 @@ app.post("/api/v1/sessions/request", async (req, res) => {
 
   // Find target host IP
   let targetIp = "127.0.0.1";
-  for (const ws of signalingSockets) {
-    if (ws.clientId === clientId) {
-      targetIp = ws.remoteIp || "127.0.0.1";
-      break;
-    }
-  }
-  if (targetIp === "127.0.0.1") {
+  const targetWs = activeClients.get(clientId);
+  if (targetWs) {
+    targetIp = targetWs.remoteIp || "127.0.0.1";
+  } else {
     const node = await prisma.desktopNode.findFirst({
       where: { remoteId: clientId }
     });
@@ -570,17 +567,16 @@ app.post("/api/v1/sessions/request", async (req, res) => {
       broadcast({ table: "RemoteSessions", type: "INSERT", row });
 
       // Notify the standby host client immediately
-      for (const ws of signalingSockets) {
-        if (ws.isHost && ws.isStandby && ws.clientId === clientId) {
-          ws.send(JSON.stringify({
-            type: "admin_request",
-            action: "admin_request",
-            ip: clientIp,
-            token: token,
-            requestId: requestId
-          }));
-          console.log(`[AUTO-APPROVE] Sent approval admin_request payload to standby host ${ws.clientId}`);
-        }
+      const hostWs = activeClients.get(clientId);
+      if (hostWs && hostWs.isHost && hostWs.isStandby) {
+        hostWs.send(JSON.stringify({
+          type: "admin_request",
+          action: "admin_request",
+          ip: clientIp,
+          token: token,
+          requestId: requestId
+        }));
+        console.log(`[AUTO-APPROVE] Sent approval admin_request payload to standby host ${clientId}`);
       }
 
       return res.json(row);
@@ -692,17 +688,16 @@ app.post("/api/v1/sessions/approve", authRequired, adminOnly, async (req, res) =
     broadcast({ table: "RemoteSessions", type: "UPDATE", row: updatedRow });
 
     // Notify the standby host client about the approved session
-    for (const ws of signalingSockets) {
-      if (ws.isHost && ws.isStandby && ws.clientId === sessionReq.clientId) {
-        ws.send(JSON.stringify({
-          type: "admin_request",
-          action: "admin_request",
-          ip: req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1",
-          token: token,
-          requestId: requestId
-        }));
-        console.log(`[APPROVE] Sent approval admin_request payload to standby host ${ws.clientId}`);
-      }
+    const hostWs = activeClients.get(sessionReq.clientId);
+    if (hostWs && hostWs.isHost && hostWs.isStandby) {
+      hostWs.send(JSON.stringify({
+        type: "admin_request",
+        action: "admin_request",
+        ip: req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1",
+        token: token,
+        requestId: requestId
+      }));
+      console.log(`[APPROVE] Sent approval admin_request payload to standby host ${sessionReq.clientId}`);
     }
 
     res.json({
@@ -1592,6 +1587,7 @@ expressServer.on("upgrade", (req, socket, head) => {
 // 2. High-Performance WebSocket/WebRTC Signaling Server on PORT_SIGNAL (7766)
 const wssSignaling = new WebSocketServer({ noServer: true });
 const signalingSockets = new Set();
+const activeClients = new Map();
 
 const signalingServer = http.createServer((req, res) => {
   res.writeHead(404);
@@ -1622,14 +1618,17 @@ signalingServer.on("upgrade", async (req, socket, head) => {
         ws.remoteIp = parsedIp;
         
         signalingSockets.add(ws);
+        activeClients.set(myId, ws);
         console.log(`[STANDBY] Client ${myId} connected as standby host from ${parsedIp}.`);
 
         ws.on("close", () => {
           signalingSockets.delete(ws);
+          activeClients.delete(myId);
           console.log(`[STANDBY] Client ${myId} disconnected.`);
         });
         ws.on("error", () => {
           signalingSockets.delete(ws);
+          activeClients.delete(myId);
         });
       });
       return;
@@ -1725,6 +1724,8 @@ signalingServer.on("upgrade", async (req, socket, head) => {
     }
     ws.remoteIp = parsedIp;
 
+    activeClients.set(myId, ws);
+
     if (myId === payload.clientId) {
       ws.isHost = true;
       ws.isController = false;
@@ -1774,34 +1775,40 @@ signalingServer.on("upgrade", async (req, socket, head) => {
           // Ignore parse errors
         }
 
-        if (messageObj && ["offer", "answer", "ice-candidate"].includes(messageObj.type)) {
-          const targetClientId = messageObj.target || messageObj.targetId;
-          if (!targetClientId) {
-            ws.send(JSON.stringify({ type: "error", error: "Target Client ID is required for signaling" }));
+        if (messageObj) {
+          if (messageObj.type === "register") {
+            const { clientId } = messageObj;
+            if (clientId) {
+              ws.uniqueClientId = clientId;
+              ws.clientId = clientId;
+              activeClients.set(clientId, ws);
+              console.log(`[REGISTER] Client ${clientId} registered successfully.`);
+            }
             return;
           }
 
-          // Find target client socket strictly by Client ID
-          let targetWs = null;
-          for (const peer of signalingSockets) {
-            if (peer.uniqueClientId === targetClientId) {
-              targetWs = peer;
-              break;
+          if (["offer", "answer", "ice-candidate"].includes(messageObj.type)) {
+            const targetClientId = messageObj.target || messageObj.targetId;
+            if (!targetClientId) {
+              ws.send(JSON.stringify({ type: "error", error: "Target Client ID is required for signaling" }));
+              return;
             }
-          }
 
-          if (targetWs) {
-            // Route exclusively to targetWs, do not reflect back or broadcast
-            targetWs.send(messageString);
-          } else {
-            // Target client B is not connected, reject connection and notify client A
-            ws.send(JSON.stringify({
-              type: "error",
-              error: `Target client ${targetClientId} is not connected to the signaling server`,
-              target: targetClientId
-            }));
+            // Look up target WebSocket strictly using activeClients Map
+            const targetWs = activeClients.get(targetClientId);
+            if (targetWs) {
+              // Route exclusively to targetWs, do not reflect back or broadcast
+              targetWs.send(messageString);
+            } else {
+              // Target client B is not connected, reject connection and notify client A
+              ws.send(JSON.stringify({
+                type: "error",
+                error: `Target PC-2 (${targetClientId}) is offline or unregistered`,
+                target: targetClientId
+              }));
+            }
+            return;
           }
-          return;
         }
 
         // Fallback for non-WebRTC control messages or image capture events
@@ -1822,11 +1829,17 @@ signalingServer.on("upgrade", async (req, socket, head) => {
     ws.on("close", () => {
       clearTimeout(expirationTimer);
       signalingSockets.delete(ws);
+      if (ws.uniqueClientId) {
+        activeClients.delete(ws.uniqueClientId);
+      }
       console.log(`[SESSION] Client ${myId || "unknown"} disconnected from session ${payload.requestId}`);
     });
     ws.on("error", () => {
       clearTimeout(expirationTimer);
       signalingSockets.delete(ws);
+      if (ws.uniqueClientId) {
+        activeClients.delete(ws.uniqueClientId);
+      }
     });
   });
 });
