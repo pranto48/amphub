@@ -1279,6 +1279,139 @@ app.post("/api/v1/admin/policies", authRequired, adminOnly, async (req, res) => 
   }
 });
 
+// ---------- User Management ----------
+app.get("/api/v1/admin/users", authRequired, adminOnly, async (req, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      orderBy: { email: "asc" }
+    });
+    const result = users.map(u => ({
+      id: u.id,
+      email: u.email,
+      displayName: u.displayName,
+      role: u.role,
+      createdAt: u.createdAt
+    }));
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/api/v1/admin/users", authRequired, adminOnly, async (req, res) => {
+  const parsed = z.object({
+    email: z.string().email(),
+    password: z.string().min(6).max(128),
+    displayName: z.string().min(1).max(80),
+    role: z.enum(["admin", "user"])
+  }).safeParse(req.body);
+
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0].message });
+  }
+
+  const { email, password, displayName, role } = parsed.data;
+
+  try {
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      return res.status(400).json({ error: "User already exists with this email" });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const newUser = await prisma.user.create({
+      data: {
+        email,
+        passwordHash,
+        displayName,
+        role
+      }
+    });
+
+    logSecurityEvent(req.user.id, "USER_CREATE", email, { role, displayName });
+
+    res.status(201).json({
+      id: newUser.id,
+      email: newUser.email,
+      displayName: newUser.displayName,
+      role: newUser.role,
+      createdAt: newUser.createdAt
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.patch("/api/v1/admin/users/:id", authRequired, adminOnly, async (req, res) => {
+  const parsed = z.object({
+    password: z.string().min(6).max(128).optional(),
+    displayName: z.string().min(1).max(80).optional(),
+    role: z.enum(["admin", "user"]).optional()
+  }).safeParse(req.body);
+
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0].message });
+  }
+
+  const { password, displayName, role } = parsed.data;
+
+  try {
+    const targetUser = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!targetUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    if (req.params.id === req.user.id && role && role !== "admin") {
+      return res.status(400).json({ error: "You cannot demote yourself from admin role" });
+    }
+
+    const data = {};
+    if (displayName !== undefined) data.displayName = displayName;
+    if (role !== undefined) data.role = role;
+    if (password !== undefined) {
+      data.passwordHash = await bcrypt.hash(password, 10);
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: req.params.id },
+      data
+    });
+
+    logSecurityEvent(req.user.id, "USER_UPDATE", updatedUser.email, { role, displayName });
+
+    res.json({
+      id: updatedUser.id,
+      email: updatedUser.email,
+      displayName: updatedUser.displayName,
+      role: updatedUser.role,
+      createdAt: updatedUser.createdAt
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete("/api/v1/admin/users/:id", authRequired, adminOnly, async (req, res) => {
+  try {
+    if (req.params.id === req.user.id) {
+      return res.status(400).json({ error: "You cannot delete your own admin account" });
+    }
+
+    const targetUser = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!targetUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    await prisma.user.delete({ where: { id: req.params.id } });
+
+    logSecurityEvent(req.user.id, "USER_DELETE", targetUser.email);
+
+    res.status(204).end();
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Serve admin control portal
 app.get("/admin", (req, res) => {
   res.sendFile(path.join(__dirname, "admin.html"));

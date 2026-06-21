@@ -37,6 +37,19 @@ async function main() {
     },
   });
 
+  // Seed default arif admin user: mail@arifmahmud.com / Interst0ff
+  await prisma.user.upsert({
+    where: { email: 'mail@arifmahmud.com' },
+    update: {},
+    create: {
+      id: '00000000-0000-0000-0000-000000000006',
+      email: 'mail@arifmahmud.com',
+      passwordHash: adminHash,
+      displayName: 'Arif Mahmud',
+      role: 'admin',
+    },
+  });
+
   // Seed bootstrap admin user if BOOTSTRAP_DEFAULT_ADMIN is true
   const bootstrapDefaultAdmin = String(process.env.BOOTSTRAP_DEFAULT_ADMIN || 'false').toLowerCase() === 'true';
   if (bootstrapDefaultAdmin) {
