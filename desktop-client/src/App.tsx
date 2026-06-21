@@ -51,6 +51,7 @@ function App() {
   const [remoteStreamObject, setRemoteStreamObject] = useState<MediaStream | null>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const [isSignalingServerReachable, setIsSignalingServerReachable] = useState<boolean | null>(null);
   const [logs, setLogs] = useState<string[]>([
     "AMPHUB Core Client initialized.",
@@ -162,7 +163,15 @@ function App() {
     pc.ontrack = (event) => {
       addLog("[WebRTC] Received remote stream track successfully!");
       if (event.streams && event.streams[0]) {
-        setRemoteStreamObject(event.streams[0]);
+        const stream = event.streams[0];
+        setRemoteStreamObject(stream);
+        // Directly bind to the video element via ref for immediate playback
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = stream;
+          remoteVideoRef.current.play().catch(err =>
+            addLog(`[WebRTC] Video autoplay deferred by browser: ${err}`)
+          );
+        }
       }
     };
 
@@ -231,21 +240,30 @@ function App() {
   }, [hostIp, port, dashboardPort]);
 
   // Handle automatic streaming based on connectionStatus
+  // ROLE SEPARATION:
+  //   Controller (PC-1): has targetId set and != myId  → pure receiver, MUST NOT capture own screen.
+  //   Host     (PC-2): no targetId / received incoming offer → capture screen and stream.
   useEffect(() => {
     if (connectionStatus === "Connected") {
-      safeInvoke("start_desktop_stream")
-        .then(() => addLog("Desktop streamer capture loop active."))
-        .catch(err => addLog(`Failed to start streamer loop: ${err}`));
-      
-      // If we are the controller, initiate WebRTC offer
-      if (targetId && targetId !== myId) {
+      const isController = !!(targetId && targetId !== myId);
+
+      if (isController) {
+        // Controller role: act as pure WebRTC receiver.
+        // Do NOT call start_desktop_stream — that would loopback our own screen.
+        addLog("[CONTROLLER] Role confirmed. Skipping local screen capture. Initiating WebRTC offer as receiver.");
         initiateWebRTCOffer();
+      } else {
+        // Host role: capture local screen and stream tracks to the controller.
+        addLog("[HOST] Role confirmed. Starting local screen capture loop for streaming.");
+        safeInvoke("start_desktop_stream")
+          .then(() => addLog("[HOST] Desktop streamer capture loop active."))
+          .catch(err => addLog(`[HOST] Failed to start streamer loop: ${err}`));
       }
     } else if (connectionStatus === "Disconnected") {
       safeInvoke("stop_desktop_stream")
         .then(() => addLog("Desktop streamer capture loop stopped."))
         .catch(err => addLog(`Failed to stop streamer loop: ${err}`));
-      
+
       closePeerConnection();
     }
   }, [connectionStatus, targetId, myId]);
@@ -1030,10 +1048,14 @@ function App() {
                         </div>
                       ) : remoteStreamObject ? (
                         <video
+                          id="remote-video-viewport"
                           ref={(el) => {
+                            remoteVideoRef.current = el;
                             if (el && el.srcObject !== remoteStreamObject) {
                               el.srcObject = remoteStreamObject;
-                              el.play().catch(err => console.error("Video play failed", err));
+                              el.play().catch(err =>
+                                console.error("[WebRTC] Video autoplay failed:", err)
+                              );
                             }
                           }}
                           className="w-full h-full object-contain"
