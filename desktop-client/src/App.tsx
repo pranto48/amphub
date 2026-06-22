@@ -57,6 +57,9 @@ function App() {
   const lastMoveSentRef = useRef<number>(0);
   const [isSignalingServerReachable, setIsSignalingServerReachable] = useState<boolean | null>(null);
   const [autostartEnabled, setAutostartEnabled] = useState(false);
+  const [unattendedAccess, setUnattendedAccess] = useState(false);
+  const [defaultPermission, setDefaultPermission] = useState<"ask" | "allow" | "deny">("ask");
+  const [discoveryEnabled, setDiscoveryEnabled] = useState(true);
   const [recentConnections, setRecentConnections] = useState<string[]>([]);
   const [logs, setLogs] = useState<string[]>([
     "AMPHUB Core Client initialized.",
@@ -242,7 +245,7 @@ function App() {
       });
   }, []);
 
-  // Initialize autostart status
+  // Initialize autostart status and security settings
   useEffect(() => {
     if (isTauri) {
       safeInvoke<boolean>("get_autostart_status")
@@ -253,6 +256,15 @@ function App() {
         .catch((err) => {
           addLog(`Failed to query startup registry: ${err}`);
         });
+      safeInvoke<boolean>("get_unattended_access")
+        .then((v) => setUnattendedAccess(v))
+        .catch(() => {});
+      safeInvoke<string>("get_default_permission")
+        .then((v) => setDefaultPermission((v as any) || "ask"))
+        .catch(() => {});
+      safeInvoke<boolean>("get_discovery_enabled")
+        .then((v) => setDiscoveryEnabled(v))
+        .catch(() => {});
     }
   }, []);
 
@@ -310,6 +322,38 @@ function App() {
       addLog(`${nextVal ? "Enabled" : "Disabled"} Startup on Windows boot.`);
     } catch (err: any) {
       addLog(`Failed to update startup setting: ${err}`);
+    }
+  };
+
+  const toggleUnattendedAccess = async () => {
+    const nextVal = !unattendedAccess;
+    setUnattendedAccess(nextVal);
+    try {
+      await safeInvoke("set_unattended_access", { enabled: nextVal });
+      addLog(`Unattended Access: ${nextVal ? "Enabled" : "Disabled"}`);
+    } catch (err: any) {
+      addLog(`Failed to set unattended access: ${err}`);
+    }
+  };
+
+  const changeDefaultPermission = async (val: "ask" | "allow" | "deny") => {
+    setDefaultPermission(val);
+    try {
+      await safeInvoke("set_default_permission", { permission: val });
+      addLog(`Default permission set to: ${val}`);
+    } catch (err: any) {
+      addLog(`Failed to set default permission: ${err}`);
+    }
+  };
+
+  const toggleDiscovery = async () => {
+    const nextVal = !discoveryEnabled;
+    setDiscoveryEnabled(nextVal);
+    try {
+      await safeInvoke("set_discovery_enabled", { enabled: nextVal });
+      addLog(`Network Discovery: ${nextVal ? "Enabled" : "Disabled"}`);
+    } catch (err: any) {
+      addLog(`Failed to set discovery: ${err}`);
     }
   };
 
@@ -415,17 +459,37 @@ function App() {
                 initiateWebRTCOffer();
               }
             } else if (data.type === "admin_request" || data.action === "admin_request") {
-              // Always show incoming permission request modal on the client host for all connections,
-              // including local subnet connections. Admin bypass applies to the Docker server side,
-              // but the host machine itself still requires approval (like AnyDesk).
-              setIncomingRequest({
-                ip: data.ip || "192.168.9.9",
-                token: data.token,
-                requestId: data.requestId
-              });
-              safeInvoke("show_app_window").catch((err) => {
-                console.error("Failed to restore app window on access request:", err);
-              });
+              // Respect default permission setting:
+              //  - "allow" (unattended) → auto-approve without popup
+              //  - "deny"              → auto-deny silently
+              //  - "ask" (default)     → show popup
+              if (unattendedAccess || defaultPermission === "allow") {
+                addLog("[AutoApprove] Unattended access active — auto-accepting incoming connection.");
+                // Auto-accept: connect directly using the provided token
+                if (!isMock && data.token) {
+                  safeInvoke("start_signaling_connection", {
+                    host: hostIp,
+                    port: Number(port),
+                    token: data.token,
+                    isMock: false
+                  }).catch((err: any) => addLog(`Auto-connect failed: ${err}`));
+                } else {
+                  setConnectionStatus("Connected");
+                  setStatusMessage("Auto-approved session active.");
+                }
+              } else if (defaultPermission === "deny") {
+                addLog("[AutoDeny] Default permission is deny — rejecting incoming connection.");
+              } else {
+                // Show popup to the user
+                setIncomingRequest({
+                  ip: data.ip || "192.168.9.9",
+                  token: data.token,
+                  requestId: data.requestId
+                });
+                safeInvoke("show_app_window").catch((err) => {
+                  console.error("Failed to restore app window on access request:", err);
+                });
+              }
             } else if (data.type === "offer") {
               addLog(`[WebRTC] Received SDP Offer from controller: ${data.sender}`);
               const senderId = data.sender;

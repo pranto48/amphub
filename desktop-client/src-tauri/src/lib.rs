@@ -9,6 +9,17 @@ use tauri::Manager;
 mod signaling;
 mod streamer;
 
+// Get physical screen dimensions using screenshots crate (already a dependency)
+fn get_screen_dimensions() -> (i32, i32) {
+    if let Ok(screens) = Screen::all() {
+        if let Some(screen) = screens.first() {
+            let info = screen.display_info;
+            return (info.width as i32, info.height as i32);
+        }
+    }
+    (1920, 1080)
+}
+
 use signaling::{
     SignalingState,
     get_connection_status,
@@ -26,7 +37,8 @@ use streamer::{
 #[derive(serde::Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum InputAction {
-    MouseMove { x: i32, y: i32 },
+    // x and y are normalized coordinates in [0.0, 1.0]
+    MouseMove { x: f64, y: f64 },
     MouseClick { button: String },
     KeyPress { key: String },
     KeyType { text: String },
@@ -97,7 +109,11 @@ fn simulate_input(action: InputAction) -> Result<(), String> {
     let mut enigo = Enigo::new();
     match action {
         InputAction::MouseMove { x, y } => {
-            enigo.mouse_move_to(x, y);
+            // x and y are normalized [0.0, 1.0] — convert to actual screen pixel coords
+            let (sw, sh) = get_screen_dimensions();
+            let px = (x.clamp(0.0, 1.0) * sw as f64).round() as i32;
+            let py = (y.clamp(0.0, 1.0) * sh as f64).round() as i32;
+            enigo.mouse_move_to(px, py);
         }
         InputAction::MouseClick { button } => {
             let btn = match button.to_lowercase().as_str() {
@@ -220,6 +236,109 @@ fn set_autostart_status(enabled: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn get_screen_dimensions_cmd() -> (i32, i32) {
+    get_screen_dimensions()
+}
+
+#[tauri::command]
+fn get_unattended_access() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::*;
+        use winreg::RegKey;
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        if let Ok(key) = hkcu.open_subkey("Software\\AMPHUB") {
+            let val: Result<u32, _> = key.get_value("UnattendedAccess");
+            return val.map(|v| v == 1).unwrap_or(false);
+        }
+        false
+    }
+    #[cfg(not(target_os = "windows"))]
+    false
+}
+
+#[tauri::command]
+fn set_unattended_access(enabled: bool) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::*;
+        use winreg::RegKey;
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let (key, _) = hkcu.create_subkey("Software\\AMPHUB").map_err(|e| e.to_string())?;
+        let val: u32 = if enabled { 1 } else { 0 };
+        key.set_value("UnattendedAccess", &val).map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    #[cfg(not(target_os = "windows"))]
+    Ok(())
+}
+
+#[tauri::command]
+fn get_default_permission() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::*;
+        use winreg::RegKey;
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        if let Ok(key) = hkcu.open_subkey("Software\\AMPHUB") {
+            let val: Result<String, _> = key.get_value("DefaultPermission");
+            return val.unwrap_or_else(|_| "ask".to_string());
+        }
+        "ask".to_string()
+    }
+    #[cfg(not(target_os = "windows"))]
+    "ask".to_string()
+}
+
+#[tauri::command]
+fn set_default_permission(permission: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::*;
+        use winreg::RegKey;
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let (key, _) = hkcu.create_subkey("Software\\AMPHUB").map_err(|e| e.to_string())?;
+        key.set_value("DefaultPermission", &permission).map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    #[cfg(not(target_os = "windows"))]
+    Ok(())
+}
+
+#[tauri::command]
+fn get_discovery_enabled() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::*;
+        use winreg::RegKey;
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        if let Ok(key) = hkcu.open_subkey("Software\\AMPHUB") {
+            let val: Result<u32, _> = key.get_value("DiscoveryEnabled");
+            return val.map(|v| v == 1).unwrap_or(true);
+        }
+        true
+    }
+    #[cfg(not(target_os = "windows"))]
+    true
+}
+
+#[tauri::command]
+fn set_discovery_enabled(enabled: bool) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::*;
+        use winreg::RegKey;
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let (key, _) = hkcu.create_subkey("Software\\AMPHUB").map_err(|e| e.to_string())?;
+        let val: u32 = if enabled { 1 } else { 0 };
+        key.set_value("DiscoveryEnabled", &val).map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    #[cfg(not(target_os = "windows"))]
+    Ok(())
+}
+
+#[tauri::command]
 fn show_app_window(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -253,6 +372,13 @@ pub fn run() {
             get_autostart_status,
             set_autostart_status,
             show_app_window,
+            get_screen_dimensions_cmd,
+            get_unattended_access,
+            set_unattended_access,
+            get_default_permission,
+            set_default_permission,
+            get_discovery_enabled,
+            set_discovery_enabled,
         ])
         .setup(|app| {
             // Setup tray menu
