@@ -117,6 +117,10 @@ fn simulate_input(action: InputAction) -> Result<(), String> {
                     "backspace" => enigo.key_click(Key::Backspace),
                     "tab" => enigo.key_click(Key::Tab),
                     "escape" => enigo.key_click(Key::Escape),
+                    "arrowup" | "up" => enigo.key_click(Key::UpArrow),
+                    "arrowdown" | "down" => enigo.key_click(Key::DownArrow),
+                    "arrowleft" | "left" => enigo.key_click(Key::LeftArrow),
+                    "arrowright" | "right" => enigo.key_click(Key::RightArrow),
                     _ => {}
                 }
             }
