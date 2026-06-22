@@ -150,6 +150,12 @@ export const restAdapter: DataClient = {
       return { error: null };
     } catch (e) { return { error: (e as Error).message }; }
   },
+  async updateNode(nodeId, updates) {
+    try {
+      await api(`/nodes/${nodeId}`, { method: "PATCH", body: JSON.stringify(updates) });
+      return { error: null };
+    } catch (e) { return { error: (e as Error).message }; }
+  },
 
   async createAccessRequest(nodeId) {
     try {

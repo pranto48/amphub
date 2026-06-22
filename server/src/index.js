@@ -330,6 +330,7 @@ app.get("/api/nodes", authRequired, async (_req, res) => {
     last_seen: n.lastSeen,
     master_password_hash: n.masterPasswordHash,
     owner_id: n.ownerId,
+    banned_until: n.bannedUntil ? n.bannedUntil.toISOString() : null,
     created_at: n.createdAt,
     updated_at: n.updatedAt
   }));
@@ -351,9 +352,54 @@ app.get("/api/nodes/:id", authRequired, async (req, res) => {
     last_seen: n.lastSeen,
     master_password_hash: n.masterPasswordHash,
     owner_id: n.ownerId,
+    banned_until: n.bannedUntil ? n.bannedUntil.toISOString() : null,
     created_at: n.createdAt,
     updated_at: n.updatedAt
   });
+});
+
+app.patch("/api/nodes/:id", authRequired, adminOnly, async (req, res) => {
+  const schema = z.object({
+    name: z.string().min(1).max(100).optional(),
+    remote_id: z.string().regex(/^\d{3}-\d{3}-\d{3}$/, "Must be formatted like 123-456-789").optional(),
+    banned_until: z.string().datetime({ precision: 3 }).nullable().optional()
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+  const data = {};
+  if (parsed.data.name !== undefined) data.name = parsed.data.name;
+  if (parsed.data.remote_id !== undefined) data.remoteId = parsed.data.remote_id;
+  if (parsed.data.banned_until !== undefined) {
+    data.bannedUntil = parsed.data.banned_until ? new Date(parsed.data.banned_until) : null;
+  }
+
+  try {
+    const updated = await prisma.desktopNode.update({
+      where: { id: req.params.id },
+      data
+    });
+    
+    const row = {
+      id: updated.id,
+      name: updated.name,
+      remote_id: updated.remoteId,
+      local_ip: updated.localIp,
+      os: updated.os,
+      status: updated.status,
+      last_seen: updated.lastSeen,
+      master_password_hash: updated.masterPasswordHash,
+      owner_id: updated.ownerId,
+      banned_until: updated.bannedUntil ? updated.bannedUntil.toISOString() : null,
+      created_at: updated.createdAt,
+      updated_at: updated.updatedAt
+    };
+    
+    broadcast({ table: "desktop_nodes", type: "UPDATE", row });
+    res.json(row);
+  } catch (e) {
+    res.status(404).json({ error: "Node not found" });
+  }
 });
 
 app.post("/api/nodes/:id/master-password", authRequired, adminOnly, async (req, res) => {
@@ -375,6 +421,11 @@ app.post("/api/nodes/:id/master-password", authRequired, adminOnly, async (req, 
 app.post("/api/access-requests", authRequired, async (req, res) => {
   const parsed = z.object({ node_id: z.string().uuid() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+  
+  const node = await prisma.desktopNode.findUnique({ where: { id: parsed.data.node_id } });
+  if (node && node.bannedUntil && new Date(node.bannedUntil) > new Date()) {
+    return res.status(400).json({ error: `This client is currently banned from remote connections until ${new Date(node.bannedUntil).toLocaleString()}` });
+  }
   
   const reqRow = await prisma.accessRequest.create({
     data: {
@@ -1674,6 +1725,22 @@ signalingServer.on("upgrade", async (req, socket, head) => {
   // 1. Standby Host Connection Flow
   if (!token || token === "null" || token === "undefined" || token === "") {
     if (myId) {
+      // Check if client is banned
+      const clientNode = await prisma.desktopNode.findFirst({
+        where: {
+          OR: [
+            { id: myId },
+            { remoteId: myId }
+          ]
+        }
+      });
+      if (clientNode && clientNode.bannedUntil && new Date(clientNode.bannedUntil) > new Date()) {
+        console.warn(`[STANDBY] Denied connection to banned standby host: ${myId}`);
+        socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+
       wssSignaling.handleUpgrade(req, socket, head, (ws) => {
         ws.clientId = myId;
         ws.isHost = true;
@@ -1731,7 +1798,20 @@ signalingServer.on("upgrade", async (req, socket, head) => {
         where: { id: payload.requestId }
       });
       if (sessionReq && sessionReq.status === "APPROVED" && new Date(sessionReq.expiresAt) > new Date()) {
-        isValidSession = true;
+        const clientNode = await prisma.desktopNode.findFirst({
+          where: {
+            OR: [
+              { id: sessionReq.clientId },
+              { remoteId: sessionReq.clientId }
+            ]
+          }
+        });
+        if (clientNode && clientNode.bannedUntil && new Date(clientNode.bannedUntil) > new Date()) {
+          console.warn(`[HANDSHAKE] Denied connection to banned client: ${sessionReq.clientId}`);
+          isValidSession = false;
+        } else {
+          isValidSession = true;
+        }
       }
     } catch (err) {
       console.error("[HANDSHAKE] Database session request look up failed:", err);

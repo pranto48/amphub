@@ -69,6 +69,7 @@ model DesktopNode {
   lastSeen           DateTime? @map("last_seen")
   masterPasswordHash String?   @map("master_password_hash")
   ownerId            String?   @map("owner_id")
+  bannedUntil        DateTime? @map("banned_until")
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at")
 

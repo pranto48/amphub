@@ -63,10 +63,20 @@ export const supabaseAdapter: DataClient = {
     const { error } = await supabase.from("desktop_nodes").update({ master_password_hash: hash }).eq("id", nodeId);
     return { error: error?.message ?? null };
   },
+  async updateNode(id, updates) {
+    const { error } = await supabase.from("desktop_nodes").update(updates).eq("id", id);
+    return { error: error?.message ?? null };
+  },
 
   async createAccessRequest(nodeId) {
     const { data: u } = await supabase.auth.getUser();
     if (!u.user) return { data: null, error: "Not authenticated" };
+
+    const { data: node } = await supabase.from("desktop_nodes").select("banned_until").eq("id", nodeId).maybeSingle();
+    if (node?.banned_until && new Date(node.banned_until) > new Date()) {
+      return { data: null, error: `This client is currently banned from remote connections until ${new Date(node.banned_until).toLocaleString()}` };
+    }
+
     const { data, error } = await supabase
       .from("access_requests")
       .insert({ node_id: nodeId, requester_id: u.user.id, status: "pending" })

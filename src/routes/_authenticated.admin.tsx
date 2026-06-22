@@ -17,11 +17,14 @@ import {
   ShieldCheck,
   UserCircle2,
   X,
+  Monitor,
+  Edit,
 } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
-import { backendMode } from "@/lib/data";
+import { backendMode, dataClient } from "@/lib/data";
+import type { DesktopNode } from "@/lib/data/types";
 import { RouteEmptyState, RouteLoadingState } from "@/components/route-state";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -29,6 +32,14 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/_authenticated/admin")({ component: AdminPanel });
 
@@ -123,6 +134,79 @@ function AdminPanel() {
   const [sessions, setSessions] = React.useState<ActiveSession[]>([]);
   const [nodeMap, setNodeMap] = React.useState<Record<string, string>>({});
   const [requesterMap, setRequesterMap] = React.useState<Record<string, RequesterInfo>>({});
+  const [clients, setClients] = React.useState<DesktopNode[]>([]);
+
+  // Client customization & ban modal states
+  const [customizingClient, setCustomizingClient] = React.useState<DesktopNode | null>(null);
+  const [customName, setCustomName] = React.useState("");
+  const [customRemoteId, setCustomRemoteId] = React.useState("");
+  const [banningClient, setBanningClient] = React.useState<DesktopNode | null>(null);
+  const [banTimeframe, setBanTimeframe] = React.useState("30m");
+  const [customBanDate, setCustomBanDate] = React.useState("");
+  const [customBanTime, setCustomBanTime] = React.useState("12:00");
+  const [banBusy, setBanBusy] = React.useState(false);
+  const [editBusy, setEditBusy] = React.useState(false);
+
+  async function handleSaveCustomize() {
+    if (!customizingClient) return;
+    setEditBusy(true);
+    try {
+      const updates = {
+        name: customName,
+        remote_id: customRemoteId,
+      };
+      const { error } = await dataClient.updateNode(customizingClient.id, updates);
+      if (error) throw new Error(error);
+      notify("success", "Client updated", `Custom name and client ID saved successfully.`);
+      setCustomizingClient(null);
+      await load();
+    } catch (e) {
+      notify("error", "Failed to update client", (e as Error).message);
+    } finally {
+      setEditBusy(false);
+    }
+  }
+
+  async function handleSaveBan() {
+    if (!banningClient) return;
+    setBanBusy(true);
+    try {
+      let banned_until: string | null = null;
+      if (banTimeframe === "30m") {
+        banned_until = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+      } else if (banTimeframe === "2h") {
+        banned_until = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+      } else if (banTimeframe === "24h") {
+        banned_until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      } else if (banTimeframe === "7d") {
+        banned_until = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      } else if (banTimeframe === "permanent") {
+        banned_until = new Date("2099-12-31T23:59:59Z").toISOString();
+      } else if (banTimeframe === "custom") {
+        if (!customBanDate || !customBanTime) {
+          throw new Error("Please select a valid custom date and time.");
+        }
+        banned_until = new Date(`${customBanDate}T${customBanTime}`).toISOString();
+      } else if (banTimeframe === "lift") {
+        banned_until = null;
+      }
+
+      const { error } = await dataClient.updateNode(banningClient.id, { banned_until });
+      if (error) throw new Error(error);
+
+      if (banned_until) {
+        notify("warning", "Client Banned", `Remote access for this client has been restricted until ${new Date(banned_until).toLocaleString()}.`);
+      } else {
+        notify("success", "Client Unbanned", `Banned status lifted. Client is now open for remote connections.`);
+      }
+      setBanningClient(null);
+      await load();
+    } catch (e) {
+      notify("error", "Failed to update ban status", (e as Error).message);
+    } finally {
+      setBanBusy(false);
+    }
+  }
 
   const [loading, setLoading] = React.useState(true);
   const [auditFilter, setAuditFilter] = React.useState<AuditFilter>("all");
@@ -393,6 +477,7 @@ function AdminPanel() {
         setPending(allRequests.filter((r) => r.status === "pending"));
         setApproved(allRequests.filter((r) => r.status === "approved"));
         setNodeMap(nodeMapping);
+        setClients((nodesRes || []) as DesktopNode[]);
         setAudit(auditLogs);
         setSessions(allSessions);
         setRequesterMap(userMapping);
@@ -416,7 +501,7 @@ function AdminPanel() {
         .select("id,node_id,requester_id,requester_identity,node_name,location_hint,status,requested_at,expires_at")
         .in("status", ["pending", "approved"])
         .order("requested_at", { ascending: false }),
-      supabase.from("desktop_nodes").select("id,name"),
+      supabase.from("desktop_nodes").select("*").order("name"),
       auditFilter === "all" ? auditQuery : auditQuery.eq("event_type", auditFilter),
       supabase
         .from("active_sessions")
@@ -451,6 +536,7 @@ function AdminPanel() {
     setPending(allRequests.filter((r) => r.status === "pending"));
     setApproved(allRequests.filter((r) => r.status === "approved"));
     setNodeMap(Object.fromEntries((nodes ?? []).map((n: { id: string; name: string }) => [n.id, n.name])));
+    setClients((nodes ?? []) as DesktopNode[]);
     setAudit((a ?? []) as Audit[]);
     setSessions(allSessions);
     setRequesterMap(requesterLookup);
@@ -720,6 +806,199 @@ function AdminPanel() {
           <Badge variant="outline" className="font-mono text-[10px] uppercase tracking-wider">admin actions</Badge>
         </div>
       </Card>
+
+      {/* Connected Windows AMPHUB Clients */}
+      <Card className="p-4" id="amphub-clients-list">
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Monitor className="size-4 text-primary" />
+            <h2 className="text-sm font-semibold">Connected Windows AMPHUB Clients</h2>
+            <Badge variant="outline" className="font-mono">{clients.length}</Badge>
+          </div>
+          <span className="text-[11px] text-muted-foreground">AnyDesk-style Client Renaming & Access Banning</span>
+        </div>
+
+        {clients.length === 0 ? (
+          <div className="py-6 text-center text-sm text-muted-foreground">No registered clients found.</div>
+        ) : (
+          <div className="divide-y divide-border border rounded-lg overflow-hidden bg-card/40">
+            {clients.map((c) => {
+              const isBanned = c.banned_until && new Date(c.banned_until) > new Date();
+              return (
+                <div key={c.id} className="flex flex-wrap items-center justify-between gap-4 p-3 hover:bg-muted/20 transition-colors">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-foreground">{c.name}</span>
+                      <span className="text-xs font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                        {c.remote_id}
+                      </span>
+                      {isBanned && (
+                        <Badge variant="destructive" className="text-[10px] font-semibold bg-red-950/60 text-red-400 border border-red-500/20">
+                          Banned
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      <span>OS: <span className="font-medium text-foreground capitalize">{c.os}</span></span>
+                      <span>IP: <span className="font-mono text-foreground">{c.local_ip || "—"}</span></span>
+                      {isBanned && (
+                        <span className="text-red-400">
+                          Banned until: {new Date(c.banned_until!).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="mr-2">
+                      <Badge variant="outline" className={`font-semibold capitalize text-[10px] ${c.status === "online" ? "bg-emerald-950/30 text-emerald-400 border-emerald-500/30" : "bg-zinc-950/30 text-zinc-400 border-zinc-500/30"}`}>
+                        {c.status}
+                      </Badge>
+                    </span>
+
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setCustomizingClient(c);
+                        setCustomName(c.name);
+                        setCustomRemoteId(c.remote_id);
+                      }}
+                      aria-label={`Customize settings for client ${c.name}`}
+                    >
+                      <Edit className="size-3.5 mr-1" /> Rename / ID
+                    </Button>
+
+                    <Button
+                      size="sm"
+                      variant={isBanned ? "outline" : "destructive"}
+                      onClick={() => {
+                        setBanningClient(c);
+                        setBanTimeframe(isBanned ? "lift" : "30m");
+                      }}
+                      aria-label={`Ban settings for client ${c.name}`}
+                    >
+                      <Ban className="size-3.5 mr-1" /> Ban Settings
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+
+      {/* Customize Client Name / ID Dialog */}
+      <Dialog open={!!customizingClient} onOpenChange={(open) => !open && setCustomizingClient(null)}>
+        <DialogContent className="max-w-md bg-background border-border">
+          <DialogHeader>
+            <DialogTitle className="text-animated-accent">Customize Client Connection Settings</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Modify the public-facing AnyDesk-style client ID and custom display name for this client node.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-name">Client Name (Alias)</Label>
+              <Input
+                id="edit-name"
+                value={customName}
+                onChange={(e) => setCustomName(e.target.value)}
+                placeholder="e.g. Office-PC-1"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-remote-id">Client Remote ID</Label>
+              <Input
+                id="edit-remote-id"
+                value={customRemoteId}
+                onChange={(e) => setCustomRemoteId(e.target.value)}
+                placeholder="e.g. 847-291-563"
+              />
+              <span className="text-[10px] text-muted-foreground block">
+                Must be formatted with 9 digits and hyphens (e.g. 123-456-789).
+              </span>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setCustomizingClient(null)}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleSaveCustomize} disabled={editBusy}>
+              {editBusy ? <Loader2 className="size-4 animate-spin mr-1" /> : <Check className="size-4 mr-1" />}
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Ban Client Dialog */}
+      <Dialog open={!!banningClient} onOpenChange={(open) => !open && setBanningClient(null)}>
+        <DialogContent className="max-w-md bg-background border-border">
+          <DialogHeader>
+            <DialogTitle className="text-animated-accent">Restrict Client Remote Access</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Ban or lift restrictions for this client. Banned clients cannot be selected or accessed.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="ban-timeframe">Select Ban Duration</Label>
+              <select
+                id="ban-timeframe"
+                value={banTimeframe}
+                onChange={(e) => setBanTimeframe(e.target.value)}
+                className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="30m">30 Minutes</option>
+                <option value="2h">2 Hours</option>
+                <option value="24h">24 Hours</option>
+                <option value="7d">7 Days</option>
+                <option value="permanent">Permanent / Indefinite</option>
+                <option value="custom">Custom Date & Time</option>
+                <option value="lift">Lift Ban / Active</option>
+              </select>
+            </div>
+
+            {banTimeframe === "custom" && (
+              <div className="grid grid-cols-2 gap-3 p-3 border rounded-lg bg-muted/30">
+                <div className="space-y-1">
+                  <Label htmlFor="custom-ban-date" className="text-xs">End Date</Label>
+                  <Input
+                    id="custom-ban-date"
+                    type="date"
+                    value={customBanDate}
+                    onChange={(e) => setCustomBanDate(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="custom-ban-time" className="text-xs">End Time</Label>
+                  <Input
+                    id="custom-ban-time"
+                    type="time"
+                    value={customBanTime}
+                    onChange={(e) => setCustomBanTime(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setBanningClient(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant={banTimeframe === "lift" ? "default" : "destructive"}
+              size="sm"
+              onClick={handleSaveBan}
+              disabled={banBusy}
+            >
+              {banBusy ? <Loader2 className="size-4 animate-spin mr-1" /> : <Ban className="size-4 mr-1" />}
+              {banTimeframe === "lift" ? "Lift Ban Status" : "Enforce Ban"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Card className="p-4">
         <div className="mb-3 flex items-center gap-2">

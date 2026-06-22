@@ -17,6 +17,7 @@ export type DesktopNode = {
   password_updated_at?: string | null;
   failed_attempts?: number | null;
   locked_until?: string | null;
+  banned_until?: string | null;
 };
 
 export type AccessRequest = {
@@ -74,6 +75,7 @@ export interface DataClient {
   listNodes(): Promise<DesktopNode[]>;
   getNode(id: string): Promise<DesktopNode | null>;
   setNodeMasterPassword(nodeId: string, hash: string): Promise<{ error: string | null }>;
+  updateNode(id: string, updates: Partial<{ name: string; remote_id: string; banned_until: string | null }>): Promise<{ error: string | null }>;
 
   // ---- access requests ----
   createAccessRequest(nodeId: string): Promise<{ data: AccessRequest | null; error: string | null }>;

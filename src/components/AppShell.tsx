@@ -10,6 +10,7 @@ import {
   Lock,
   Server,
   Menu,
+  Info,
 } from "lucide-react";
 import {
   Sidebar,
@@ -31,6 +32,7 @@ import { useAuth } from "@/lib/auth-context";
 const nav = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { to: "/admin", label: "Admin Panel", icon: ShieldCheck, adminOnly: true },
+  { to: "/about", label: "About & Downloads", icon: Info },
   { to: "/security", label: "Security", icon: Lock },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
