@@ -80,7 +80,7 @@ function App() {
   };
 
   const closeAllPeerConnections = () => {
-    for (const [peerId, pc] of peerConnectionsRef.current.entries()) {
+    for (const pc of peerConnectionsRef.current.values()) {
       pc.close();
     }
     peerConnectionsRef.current.clear();
