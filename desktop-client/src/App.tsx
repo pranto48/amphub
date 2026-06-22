@@ -50,6 +50,7 @@ function App() {
   const [remoteScreen, setRemoteScreen] = useState<string | null>(null);
   const [incomingRequest, setIncomingRequest] = useState<{ ip: string; token?: string; requestId?: string } | null>(null);
   const [remoteStreamObject, setRemoteStreamObject] = useState<MediaStream | null>(null);
+  const [isFullScreen, setIsFullScreen] = useState(false);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -88,17 +89,23 @@ function App() {
   };
 
   const getLocalStream = async (): Promise<MediaStream> => {
-    try {
-      if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
-        return await navigator.mediaDevices.getDisplayMedia({ video: true });
+    // If running inside Tauri native shell, always bypass navigator sharing dialog
+    // and use programmatic direct screen capture loop to enforce entire screen sharing.
+    if (isTauri) {
+      addLog("[WebRTC] Initializing native programmatic canvas capture loop to share entire screen.");
+    } else {
+      try {
+        if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+          return await navigator.mediaDevices.getDisplayMedia({ video: true });
+        }
+      } catch (e) {
+        console.warn("getDisplayMedia failed, falling back to canvas-based stream capture", e);
       }
-    } catch (e) {
-      console.warn("getDisplayMedia failed, falling back to canvas-based stream capture", e);
     }
     
     const canvas = document.createElement("canvas");
-    canvas.width = 1280;
-    canvas.height = 720;
+    canvas.width = 1920;
+    canvas.height = 1080;
     const ctx = canvas.getContext("2d");
     
     const img = new Image();
@@ -127,7 +134,7 @@ function App() {
       }
     };
     
-    const intervalId = setInterval(updateCanvas, 200);
+    const intervalId = setInterval(updateCanvas, 100); // 100ms = 10 FPS capture loop
     const stream = (canvas as any).captureStream(10); // 10 fps
     stream.getTracks().forEach((track: any) => {
       const originalStop = track.stop;
@@ -300,35 +307,14 @@ function App() {
               setSessionRole(data.role);
               addLog(`[Role Assignment] Server assigned role: ${data.role.toUpperCase()}`);
             } else if (data.type === "admin_request" || data.action === "admin_request") {
-              if (data.isLocalSubnet) {
-                addLog(`[AUTO-CONNECT] Local subnet request from ${data.ip} is auto-approved. Connecting...`);
-                if (!isMock && data.token) {
-                  try {
-                    setConnectionStatus("Connecting");
-                    setStatusMessage("Establishing connection for session...");
-                    await safeInvoke("start_signaling_connection", {
-                      host: hostIp,
-                      port: Number(port),
-                      token: data.token,
-                      isMock: false
-                    });
-                  } catch (err: any) {
-                    addLog(`Failed to connect host: ${err}`);
-                    setConnectionStatus("Disconnected");
-                  }
-                } else {
-                  setConnectionStatus("Connected");
-                  setStatusMessage("Admin control session active from " + data.ip);
-                  safeInvoke("start_desktop_stream");
-                  setRemoteScreen("mock");
-                }
-              } else {
-                setIncomingRequest({
-                  ip: data.ip || "192.168.9.9",
-                  token: data.token,
-                  requestId: data.requestId
-                });
-              }
+              // Always show incoming permission request modal on the client host for all connections,
+              // including local subnet connections. Admin bypass applies to the Docker server side,
+              // but the host machine itself still requires approval (like AnyDesk).
+              setIncomingRequest({
+                ip: data.ip || "192.168.9.9",
+                token: data.token,
+                requestId: data.requestId
+              });
             } else if (data.type === "offer") {
               addLog(`[WebRTC] Received SDP Offer from controller: ${data.sender}`);
               closePeerConnection();
@@ -381,6 +367,12 @@ function App() {
             } else if (data.type === "ice-candidate") {
               if (peerConnectionRef.current) {
                 await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+              }
+            } else if (["mouseMove", "mouseClick", "keyPress", "keyType"].includes(data.type)) {
+              if (sessionRole === "host") {
+                safeInvoke("simulate_input", { action: data }).catch(err => {
+                  console.error("Failed to simulate remote input:", err);
+                });
               }
             } else if (data.type === "error") {
               addLog(`[Signaling Error] ${data.error}`);
@@ -577,7 +569,7 @@ function App() {
     }
   };
 
-  const handleScreenInteraction = (e: React.MouseEvent<HTMLDivElement>, actionType: "click" | "move") => {
+  const handleScreenInteraction = (e: React.MouseEvent<HTMLDivElement>, actionType: "click" | "move" | "rightclick") => {
     if (!remoteScreenRef.current) return;
     const rect = remoteScreenRef.current.getBoundingClientRect();
     
@@ -618,6 +610,39 @@ function App() {
           });
         });
       }
+    } else if (actionType === "rightclick") {
+      addLog(`Input Emulation: Right click at relative coordinates (${x}, ${y})`);
+      if (connectionStatus === "Connected" && !isMock) {
+        safeInvoke("send_signaling_message", {
+          message: JSON.stringify({
+            type: "mouseMove",
+            x,
+            y
+          })
+        }).then(() => {
+          safeInvoke("send_signaling_message", {
+            message: JSON.stringify({
+              type: "mouseClick",
+              button: "right"
+            })
+          });
+        });
+      } else {
+        safeInvoke("simulate_input", {
+          action: {
+            type: "mouseMove",
+            x,
+            y
+          }
+        }).then(() => {
+          safeInvoke("simulate_input", {
+            action: {
+              type: "mouseClick",
+              button: "right"
+            }
+          });
+        });
+      }
     } else if (actionType === "move") {
       if (connectionStatus === "Connected" && !isMock) {
         safeInvoke("send_signaling_message", {
@@ -628,6 +653,39 @@ function App() {
           })
         });
       }
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const key = e.key;
+
+    // Support exiting full screen view with Escape key
+    if (key === "Escape") {
+      setIsFullScreen(false);
+      return;
+    }
+
+    if (["Shift", "Control", "Alt", "Meta", "CapsLock"].includes(key)) {
+      return;
+    }
+
+    addLog(`Input Emulation: Key press: ${key}`);
+
+    if (connectionStatus === "Connected" && !isMock) {
+      safeInvoke("send_signaling_message", {
+        message: JSON.stringify({
+          type: "keyPress",
+          key: key
+        })
+      });
+    } else {
+      safeInvoke("simulate_input", {
+        action: {
+          type: "keyPress",
+          key: key
+        }
+      });
     }
   };
 
@@ -947,7 +1005,7 @@ function App() {
               )}
 
               {/* Active Session Desktop Screen */}
-              {connectionStatus === "Connected" && (
+              {connectionStatus === "Connected" && sessionRole === "controller" && (
                 <div className="space-y-6">
                   {/* Remote Window Workspace */}
                   <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col">
@@ -965,12 +1023,25 @@ function App() {
                       {/* Connection Actions */}
                       <div className="flex items-center gap-2">
                         <button 
+                          onClick={() => setIsFullScreen(!isFullScreen)}
+                          title="Toggle Full Screen view"
+                          className="p-1.5 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-rose-400 rounded-md border border-slate-800 transition-colors cursor-pointer"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            {isFullScreen ? (
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 14h6v6m10-6h-6v6M4 10h6V4m10 6h-6V4" />
+                            ) : (
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 8V4h4m12 4V4h-4M4 16v4h4m12-4v4h-4" />
+                            )}
+                          </svg>
+                        </button>
+                        <button 
                           onClick={fetchClipboard}
                           title="Sync target clipboard to local clipboard"
                           className="p-1.5 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-rose-400 rounded-md border border-slate-800 transition-colors cursor-pointer"
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                           </svg>
                         </button>
                         <button 
@@ -1004,10 +1075,29 @@ function App() {
                     {/* Viewport Screen */}
                     <div 
                       ref={remoteScreenRef}
+                      tabIndex={0}
                       onClick={(e) => handleScreenInteraction(e, "click")}
                       onMouseMove={(e) => handleScreenInteraction(e, "move")}
-                      className="aspect-video bg-neutral-900 relative cursor-crosshair overflow-hidden group select-none flex items-center justify-center border-t border-slate-800"
+                      onContextMenu={(e) => { e.preventDefault(); handleScreenInteraction(e, "rightclick"); }}
+                      onKeyDown={(e) => handleKeyPress(e)}
+                      className={`${
+                        isFullScreen 
+                          ? "fixed inset-0 z-50 bg-black w-screen h-screen flex items-center justify-center outline-none cursor-crosshair" 
+                          : "aspect-video bg-neutral-900 relative cursor-crosshair overflow-hidden group select-none flex items-center justify-center border-t border-slate-800 outline-none"
+                      }`}
                     >
+                      {isFullScreen && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setIsFullScreen(false); }}
+                          className="absolute top-4 right-4 z-50 p-2.5 bg-slate-900/90 hover:bg-slate-800 border border-slate-850 text-slate-400 hover:text-rose-400 rounded-xl transition-all shadow-xl flex items-center gap-1.5 cursor-pointer font-sans text-xs font-bold"
+                          title="Exit Full Screen (Esc)"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                          Exit Full Screen
+                        </button>
+                      )}
                       {remoteScreen === "mock" ? (
                         /* Simulated Remote Windows OS environment */
                         <div className="absolute inset-0 bg-gradient-to-tr from-slate-900 via-indigo-950 to-slate-900 flex flex-col justify-between p-6">
@@ -1143,6 +1233,29 @@ function App() {
                         Write Host
                       </button>
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {connectionStatus === "Connected" && sessionRole === "host" && (
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center shadow-2xl relative overflow-hidden backdrop-blur-sm max-w-lg mx-auto">
+                  <div className="absolute top-0 left-0 w-full h-[4px] bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-400 animate-pulse"></div>
+                  <div className="py-8">
+                    <div className="w-24 h-24 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-center justify-center text-emerald-400 mx-auto mb-8 shadow-lg shadow-emerald-950/50">
+                      <svg className="w-12 h-12 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-xl font-extrabold text-white mb-3">AMPHUB sharing you screen.</h3>
+                    <p className="text-slate-400 text-sm mb-8 leading-relaxed">
+                      A remote controller is currently viewing and controlling your desktop. Your actions and screen are encrypted and streamed in real-time.
+                    </p>
+                    <button
+                      onClick={handleDisconnect}
+                      className="cursor-pointer px-6 py-3.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-rose-950 transition-all active:scale-[0.98]"
+                    >
+                      Stop Sharing
+                    </button>
                   </div>
                 </div>
               )}
