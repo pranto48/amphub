@@ -44,8 +44,9 @@ function App() {
   const [port, setPort] = useState(() => Number(localStorage.getItem("amphub_control_port")) || 7766);
   const [dashboardPort, setDashboardPort] = useState(() => Number(localStorage.getItem("amphub_dashboard_port")) || 3355);
   const [token, setToken] = useState("");
-  const [isMock, setIsMock] = useState(true);
+  const [isMock, setIsMock] = useState(!isTauri);
   const [myId, setMyId] = useState("Loading...");
+  const [sessionRole, setSessionRole] = useState<"host" | "controller" | null>(null);
   const [remoteScreen, setRemoteScreen] = useState<string | null>(null);
   const [incomingRequest, setIncomingRequest] = useState<{ ip: string; token?: string; requestId?: string } | null>(null);
   const [remoteStreamObject, setRemoteStreamObject] = useState<MediaStream | null>(null);
@@ -241,32 +242,31 @@ function App() {
 
   // Handle automatic streaming based on connectionStatus
   // ROLE SEPARATION:
-  //   Controller (PC-1): has targetId set and != myId  → pure receiver, MUST NOT capture own screen.
-  //   Host     (PC-2): no targetId / received incoming offer → capture screen and stream.
+  //   Controller (PC-1): assigned "controller" role by server → pure receiver, MUST NOT capture own screen.
+  //   Host     (PC-2): assigned "host" role by server → capture screen and stream.
   useEffect(() => {
-    if (connectionStatus === "Connected") {
-      const isController = !!(targetId && targetId !== myId);
-
-      if (isController) {
+    if (connectionStatus === "Connected" && sessionRole) {
+      if (sessionRole === "controller") {
         // Controller role: act as pure WebRTC receiver.
         // Do NOT call start_desktop_stream — that would loopback our own screen.
-        addLog("[CONTROLLER] Role confirmed. Skipping local screen capture. Initiating WebRTC offer as receiver.");
+        addLog("[CONTROLLER] Role confirmed by server. Skipping local screen capture. Initiating WebRTC offer as receiver.");
         initiateWebRTCOffer();
-      } else {
+      } else if (sessionRole === "host") {
         // Host role: capture local screen and stream tracks to the controller.
-        addLog("[HOST] Role confirmed. Starting local screen capture loop for streaming.");
+        addLog("[HOST] Role confirmed by server. Starting local screen capture loop for streaming.");
         safeInvoke("start_desktop_stream")
           .then(() => addLog("[HOST] Desktop streamer capture loop active."))
           .catch(err => addLog(`[HOST] Failed to start streamer loop: ${err}`));
       }
     } else if (connectionStatus === "Disconnected") {
+      setSessionRole(null);
       safeInvoke("stop_desktop_stream")
         .then(() => addLog("Desktop streamer capture loop stopped."))
         .catch(err => addLog(`Failed to stop streamer loop: ${err}`));
 
       closePeerConnection();
     }
-  }, [connectionStatus, targetId, myId]);
+  }, [connectionStatus, sessionRole]);
 
   // Listen to Tauri signaling events
   useEffect(() => {
@@ -296,12 +296,39 @@ function App() {
         } else {
           try {
             const data = JSON.parse(text);
-            if (data.type === "admin_request" || data.action === "admin_request") {
-              setIncomingRequest({
-                ip: data.ip || "192.168.9.9",
-                token: data.token,
-                requestId: data.requestId
-              });
+            if (data.type === "role_assignment") {
+              setSessionRole(data.role);
+              addLog(`[Role Assignment] Server assigned role: ${data.role.toUpperCase()}`);
+            } else if (data.type === "admin_request" || data.action === "admin_request") {
+              if (data.isLocalSubnet) {
+                addLog(`[AUTO-CONNECT] Local subnet request from ${data.ip} is auto-approved. Connecting...`);
+                if (!isMock && data.token) {
+                  try {
+                    setConnectionStatus("Connecting");
+                    setStatusMessage("Establishing connection for session...");
+                    await safeInvoke("start_signaling_connection", {
+                      host: hostIp,
+                      port: Number(port),
+                      token: data.token,
+                      isMock: false
+                    });
+                  } catch (err: any) {
+                    addLog(`Failed to connect host: ${err}`);
+                    setConnectionStatus("Disconnected");
+                  }
+                } else {
+                  setConnectionStatus("Connected");
+                  setStatusMessage("Admin control session active from " + data.ip);
+                  safeInvoke("start_desktop_stream");
+                  setRemoteScreen("mock");
+                }
+              } else {
+                setIncomingRequest({
+                  ip: data.ip || "192.168.9.9",
+                  token: data.token,
+                  requestId: data.requestId
+                });
+              }
             } else if (data.type === "offer") {
               addLog(`[WebRTC] Received SDP Offer from controller: ${data.sender}`);
               closePeerConnection();
@@ -389,6 +416,7 @@ function App() {
   };
 
   const handleConnect = async () => {
+    const cleanTargetId = targetId.trim().toUpperCase();
     if (!isMock && isSignalingServerReachable === false) {
       addLog("Error: Cannot connect to target. AMPHUB signaling server is unreachable.");
       setStatusMessage("Offline: Server connection required.");
@@ -396,7 +424,7 @@ function App() {
     }
 
     try {
-      addLog(`Initiating connection. Target: ${targetId}, Endpoint: ${hostIp}:${port}`);
+      addLog(`Initiating connection. Target: ${cleanTargetId}, Endpoint: ${hostIp}:${port}`);
       
       if (isMock) {
         // Browser mock flow
@@ -433,7 +461,7 @@ function App() {
         // Request a new session and poll for approval
         setConnectionStatus("Connecting");
         setStatusMessage("Requesting session approval from admin...");
-        addLog(`POSTing session request to /api/v1/sessions/request for target client: ${targetId}`);
+        addLog(`POSTing session request to /api/v1/sessions/request for target client: ${cleanTargetId}`);
 
         const response = await fetch(`http://${hostIp}:${dashboardPort}/api/v1/sessions/request`, {
           method: "POST",
@@ -441,7 +469,7 @@ function App() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            clientId: targetId,
+            clientId: cleanTargetId,
             metadata: {
               controllerId: myId,
               platform: "Windows Client",

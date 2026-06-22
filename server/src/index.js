@@ -608,7 +608,8 @@ app.post("/api/v1/sessions/request", async (req, res) => {
           action: "admin_request",
           ip: clientIp,
           token: token,
-          requestId: requestId
+          requestId: requestId,
+          isLocalSubnet: true
         }));
         console.log(`[AUTO-APPROVE] Sent approval admin_request payload to standby host ${clientId}`);
       }
@@ -1660,6 +1661,7 @@ signalingServer.on("upgrade", async (req, socket, head) => {
         signalingSockets.add(ws);
         activeClients.set(myId, ws);
         console.log(`[STANDBY] Client ${myId} connected as standby host from ${parsedIp}.`);
+        ws.send(JSON.stringify({ type: "role_assignment", role: "host" }));
 
         ws.on("close", () => {
           signalingSockets.delete(ws);
@@ -1771,10 +1773,12 @@ signalingServer.on("upgrade", async (req, socket, head) => {
       ws.isHost = true;
       ws.isController = false;
       console.log(`[SESSION] Host ${myId} joined active session ${payload.requestId} from ${parsedIp}`);
+      ws.send(JSON.stringify({ type: "role_assignment", role: "host" }));
     } else {
       ws.isHost = false;
       ws.isController = true;
       console.log(`[SESSION] Controller ${myId} joined active session ${payload.requestId} from ${parsedIp}`);
+      ws.send(JSON.stringify({ type: "role_assignment", role: "controller" }));
     }
 
     const remainingMs = (payload.exp * 1000) - Date.now();
