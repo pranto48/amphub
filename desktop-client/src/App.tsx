@@ -938,6 +938,14 @@ function App() {
         });
       }
     } else if (actionType === "move") {
+      setShowMovementCursor(true);
+      if (cursorMovementTimeoutRef.current) {
+        clearTimeout(cursorMovementTimeoutRef.current);
+      }
+      cursorMovementTimeoutRef.current = setTimeout(() => {
+        setShowMovementCursor(false);
+      }, 2000);
+
       const now = Date.now();
       if (now - lastMoveSentRef.current < 50) return; // limit to 20 moves per second (50ms interval)
       lastMoveSentRef.current = now;
