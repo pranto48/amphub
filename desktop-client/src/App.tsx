@@ -74,6 +74,8 @@ function App() {
 
   const remoteScreenRef = useRef<HTMLDivElement>(null);
   const pollingRef = useRef<any>(null);
+  const unattendedAccessRef = useRef(false);
+  const defaultPermissionRef = useRef<"ask" | "allow" | "deny">("ask");
 
   const clearPolling = () => {
     if (pollingRef.current) {
@@ -257,10 +259,10 @@ function App() {
           addLog(`Failed to query startup registry: ${err}`);
         });
       safeInvoke<boolean>("get_unattended_access")
-        .then((v) => setUnattendedAccess(v))
+        .then((v) => { setUnattendedAccess(v); unattendedAccessRef.current = v; })
         .catch(() => {});
       safeInvoke<string>("get_default_permission")
-        .then((v) => setDefaultPermission((v as any) || "ask"))
+        .then((v) => { const perm = (v as any) || "ask"; setDefaultPermission(perm); defaultPermissionRef.current = perm; })
         .catch(() => {});
       safeInvoke<boolean>("get_discovery_enabled")
         .then((v) => setDiscoveryEnabled(v))
@@ -328,6 +330,7 @@ function App() {
   const toggleUnattendedAccess = async () => {
     const nextVal = !unattendedAccess;
     setUnattendedAccess(nextVal);
+    unattendedAccessRef.current = nextVal;
     try {
       await safeInvoke("set_unattended_access", { enabled: nextVal });
       addLog(`Unattended Access: ${nextVal ? "Enabled" : "Disabled"}`);
@@ -338,6 +341,7 @@ function App() {
 
   const changeDefaultPermission = async (val: "ask" | "allow" | "deny") => {
     setDefaultPermission(val);
+    defaultPermissionRef.current = val;
     try {
       await safeInvoke("set_default_permission", { permission: val });
       addLog(`Default permission set to: ${val}`);
@@ -463,7 +467,7 @@ function App() {
               //  - "allow" (unattended) → auto-approve without popup
               //  - "deny"              → auto-deny silently
               //  - "ask" (default)     → show popup
-              if (unattendedAccess || defaultPermission === "allow") {
+              if (unattendedAccessRef.current || defaultPermissionRef.current === "allow") {
                 addLog("[AutoApprove] Unattended access active — auto-accepting incoming connection.");
                 // Auto-accept: connect directly using the provided token
                 if (!isMock && data.token) {
@@ -477,7 +481,7 @@ function App() {
                   setConnectionStatus("Connected");
                   setStatusMessage("Auto-approved session active.");
                 }
-              } else if (defaultPermission === "deny") {
+              } else if (defaultPermissionRef.current === "deny") {
                 addLog("[AutoDeny] Default permission is deny — rejecting incoming connection.");
               } else {
                 // Show popup to the user
@@ -1577,21 +1581,82 @@ function App() {
                 </div>
               </div>
 
-              {/* Simulation Tools */}
+              {/* Security & Access Settings */}
               <div className="bg-slate-900/50 rounded-2xl border border-slate-800 p-6 space-y-4">
-                <h3 className="text-base font-extrabold text-white">Unattended Access Simulation Controls</h3>
+                <div className="flex items-center gap-2">
+                  <svg className="w-5 h-5 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  </svg>
+                  <h3 className="text-base font-extrabold text-white">Security &amp; Access Control</h3>
+                </div>
                 <p className="text-xs text-slate-400">
-                  Trigger mock authorization requests and verify notification prompts.
+                  Configure how AMPHUB handles incoming remote access requests and device discovery.
                 </p>
-                <div className="flex flex-col gap-2 pt-3 border-t border-slate-800/80">
+
+                <div className="space-y-4 pt-3 border-t border-slate-800/80">
+                  {/* Unattended Access Toggle */}
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <span className="text-sm font-semibold text-slate-300 block">Unattended Access</span>
+                      <span className="text-[10px] text-slate-500">Allow connections without requiring your approval each time (like AnyDesk unattended)</span>
+                    </div>
+                    <button
+                      onClick={toggleUnattendedAccess}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${unattendedAccess ? "bg-rose-600" : "bg-slate-800"}`}
+                    >
+                      <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${unattendedAccess ? "translate-x-5" : "translate-x-0"}`}></span>
+                    </button>
+                  </div>
+
+                  {/* Default Permission */}
+                  <div className="pt-3 border-t border-slate-800/40">
+                    <span className="text-sm font-semibold text-slate-300 block mb-1">Default Permission</span>
+                    <span className="text-[10px] text-slate-500 block mb-3">What happens when a connection request arrives (overrides Unattended Access if set)</span>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(["ask", "allow", "deny"] as const).map((opt) => (
+                        <button
+                          key={opt}
+                          onClick={() => changeDefaultPermission(opt)}
+                          className={`py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                            defaultPermission === opt
+                              ? opt === "allow" ? "bg-emerald-600/20 border-emerald-500/60 text-emerald-400"
+                              : opt === "deny" ? "bg-rose-600/20 border-rose-500/60 text-rose-400"
+                              : "bg-amber-600/20 border-amber-500/60 text-amber-400"
+                              : "bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700"
+                          }`}
+                        >
+                          {opt === "ask" ? "Ask Always" : opt === "allow" ? "Allow All" : "Deny All"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Network Discovery */}
+                  <div className="flex justify-between items-center pt-3 border-t border-slate-800/40">
+                    <div>
+                      <span className="text-sm font-semibold text-slate-300 block">Network Discovery</span>
+                      <span className="text-[10px] text-slate-500">Allow other AMPHUB clients on your network to discover this device</span>
+                    </div>
+                    <button
+                      onClick={toggleDiscovery}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${discoveryEnabled ? "bg-emerald-600" : "bg-slate-800"}`}
+                    >
+                      <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${discoveryEnabled ? "translate-x-5" : "translate-x-0"}`}></span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Test incoming request */}
+                <div className="pt-3 border-t border-slate-800/40">
+                  <p className="text-[10px] text-slate-500 mb-2">Test incoming access request simulation:</p>
                   <button
                     onClick={() => {
                       setIncomingRequest({ ip: "192.168.9.9" });
                       addLog("Triggered mock incoming Admin request from 192.168.9.9.");
                     }}
-                    className="cursor-pointer py-3 bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white rounded-xl text-xs font-bold shadow-lg transition-all"
+                    className="cursor-pointer w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all"
                   >
-                    Simulate Incoming Admin Access Request
+                    Simulate Incoming Access Request
                   </button>
                 </div>
               </div>
