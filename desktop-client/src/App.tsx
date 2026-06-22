@@ -79,11 +79,11 @@ function App() {
     }
   };
 
-  const closePeerConnection = () => {
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
-      peerConnectionRef.current = null;
+  const closeAllPeerConnections = () => {
+    for (const [peerId, pc] of peerConnectionsRef.current.entries()) {
+      pc.close();
     }
+    peerConnectionsRef.current.clear();
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => track.stop());
       localStreamRef.current = null;
@@ -91,7 +91,25 @@ function App() {
     setRemoteStreamObject(null);
   };
 
+  const closePeerConnection = (peerId: string) => {
+    const pc = peerConnectionsRef.current.get(peerId);
+    if (pc) {
+      pc.close();
+      peerConnectionsRef.current.delete(peerId);
+    }
+    if (peerConnectionsRef.current.size === 0) {
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
+      }
+      setRemoteStreamObject(null);
+    }
+  };
+
   const getLocalStream = async (): Promise<MediaStream> => {
+    if (localStreamRef.current && localStreamRef.current.active) {
+      return localStreamRef.current;
+    }
     // First, try native Chromium getDisplayMedia which is auto-approved via additionalBrowserArgs
     try {
       if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
@@ -101,8 +119,9 @@ function App() {
             displaySurface: "monitor",
             width: { ideal: 1920 },
             height: { ideal: 1080 },
-            frameRate: { ideal: 30 }
-          },
+            frameRate: { ideal: 30 },
+            cursor: "always"
+          } as any,
           audio: false
         });
         addLog("[WebRTC] Successfully acquired native display media stream.");
