@@ -17,6 +17,10 @@
         "height": 800,
         "minWidth": 1024,
         "minHeight": 600,
+        "minimizable": true,
+        "maximizable": true,
+        "resizable": true,
+        "decorations": true,
         "maximized": false,
         "center": true,
         "additionalBrowserArgs": "--auto-select-desktop-capture-source=\"Entire Screen\" --use-fake-ui-for-media-stream --enable-features=WebRTCPipeWireCapturer"

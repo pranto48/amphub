@@ -2,7 +2,7 @@ import * as React from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";
 import { supabase } from "@/integrations/supabase/client";
-import { dataClient } from "@/lib/data";
+import { dataClient, backendMode } from "@/lib/data";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -168,16 +168,32 @@ function FileExplorer() {
   }
 
   async function recordAction(action: string, metadata: Record<string, unknown>) {
-    const { data } = await supabase.rpc("record_privileged_event", {
-      p_node_id: id,
-      p_action: action,
-      p_request_id: search.requestId ?? undefined,
-      p_requester_id: user?.id ?? undefined,
-      p_session_token: search.sessionToken ?? undefined,
-      p_local: search.local ?? false,
-      p_metadata: metadata as any,
-    });
-    return data?.[0] ?? { authorized: false, denial_reason: "request_not_approved" };
+    if (backendMode === "supabase") {
+      const { data } = await supabase.rpc("record_privileged_event", {
+        p_node_id: id,
+        p_action: action,
+        p_request_id: search.requestId ?? undefined,
+        p_requester_id: user?.id ?? undefined,
+        p_session_token: search.sessionToken ?? undefined,
+        p_local: search.local ?? false,
+        p_metadata: metadata as any,
+      });
+      return (data as any)?.[0] ?? { authorized: false, denial_reason: "request_not_approved" };
+    } else {
+      // In local REST mode, authenticated operators are authorized to trigger file management events
+      const { error } = await dataClient.recordPrivilegedEvent(
+        id,
+        action,
+        search.requestId ?? undefined,
+        search.sessionToken ?? undefined,
+        search.local ?? false,
+        metadata
+      );
+      if (error) {
+        return { authorized: false, denial_reason: error };
+      }
+      return { authorized: true, denial_reason: null };
+    }
   }
 
   async function createFolder() {

@@ -1,7 +1,6 @@
 import * as React from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { z } from "zod";
-import { supabase } from "@/integrations/supabase/client";
 import { dataClient } from "@/lib/data";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -97,12 +96,8 @@ function RemoteSession() {
       setSessionToken(undefined);
       return;
     }
-    supabase
-      .from("access_requests")
-      .select("session_token")
-      .eq("id", search.requestId)
-      .maybeSingle()
-      .then((res: any) => setSessionToken(res.data?.session_token ?? undefined));
+    dataClient.getAccessRequest(search.requestId)
+      .then((req) => setSessionToken(req?.session_token ?? undefined));
   }, [search.requestId, search.local]);
 
   React.useEffect(() => {
@@ -218,30 +213,24 @@ function RemoteSession() {
       return;
     }
 
-    const verify = await supabase.rpc("verify_node_master_password", {
-      p_node_id: id,
-      p_password: password,
-      p_context: "session_ctrl_alt_del",
-    });
-    const verifyResult = verify.data?.[0];
-    if (verify.error || !verifyResult?.verified) {
+    const verify = await dataClient.verifyNodeMasterPassword(id, password, "session_ctrl_alt_del");
+    if (verify.error || !verify.verified) {
       toast.error("Password verification failed", {
-        description: verifyResult?.error_code ?? verify.error?.message ?? "invalid_password",
+        description: verify.error ?? "invalid_password",
       });
       return;
     }
 
     await adapterRef.current?.sendInput({ type: "command", command: "ctrl_alt_del" });
 
-    await supabase.rpc("record_privileged_event", {
-      p_node_id: id,
-      p_action: "session_ctrl_alt_del",
-      p_request_id: search.requestId ?? undefined,
-      p_requester_id: user?.id ?? undefined,
-      p_session_token: sessionToken ?? undefined,
-      p_local: search.local ?? false,
-      p_metadata: { node_name: name, command: "ctrl_alt_del", stream_state: viewerState } as any,
-    });
+    await dataClient.recordPrivilegedEvent(
+      id,
+      "session_ctrl_alt_del",
+      search.requestId ?? undefined,
+      sessionToken ?? undefined,
+      search.local ?? false,
+      { node_name: name, command: "ctrl_alt_del", stream_state: viewerState }
+    );
 
     toast.info("Ctrl+Alt+Del sent", { description: "Delivered via authenticated control channel" });
   }
@@ -250,15 +239,14 @@ function RemoteSession() {
     await adapterRef.current?.disconnect("user_disconnect");
     adapterRef.current = null;
 
-    await supabase.rpc("record_privileged_event", {
-      p_node_id: id,
-      p_action: "session_end",
-      p_request_id: search.requestId ?? undefined,
-      p_requester_id: user?.id ?? undefined,
-      p_session_token: sessionToken ?? undefined,
-      p_local: search.local ?? false,
-      p_metadata: { node_name: name, source: "disconnect", connection_state: connectionState } as any,
-    });
+    await dataClient.recordPrivilegedEvent(
+      id,
+      "session_end",
+      search.requestId ?? undefined,
+      sessionToken ?? undefined,
+      search.local ?? false,
+      { node_name: name, source: "disconnect", connection_state: connectionState }
+    );
 
     toast.success("Session ended");
     navigate({ to: "/" });

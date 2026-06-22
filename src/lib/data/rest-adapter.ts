@@ -156,6 +156,36 @@ export const restAdapter: DataClient = {
       return { error: null };
     } catch (e) { return { error: (e as Error).message }; }
   },
+  async verifyNodeMasterPassword(nodeId, password, context) {
+    try {
+      const res = await api<{ verified: boolean; error?: string }>((`/nodes/${nodeId}/verify-password`), {
+        method: "POST",
+        body: JSON.stringify({ password, context }),
+      });
+      return { verified: res.verified, error: res.error ?? null };
+    } catch (e) {
+      return { verified: false, error: (e as Error).message };
+    }
+  },
+  async recordPrivilegedEvent(nodeId, action, requestId, sessionToken, local, metadata) {
+    try {
+      await api("/audit/privileged-event", {
+        method: "POST",
+        body: JSON.stringify({
+          nodeId,
+          action,
+          requestId,
+          sessionToken,
+          local,
+          metadata,
+        }),
+      });
+      return { error: null };
+    } catch (e) {
+      return { error: (e as Error).message };
+    }
+  },
+
 
   async createAccessRequest(nodeId) {
     try {

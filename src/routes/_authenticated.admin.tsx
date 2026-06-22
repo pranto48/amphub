@@ -714,6 +714,10 @@ function AdminPanel() {
   }
 
   async function exportIncident(format: "csv" | "json") {
+    if (backendMode === "rest") {
+      exportAuditReport(format);
+      return;
+    }
     setExporting(format);
     const { data, error } = await supabase.rpc("export_incident_review", {
       p_format: format,

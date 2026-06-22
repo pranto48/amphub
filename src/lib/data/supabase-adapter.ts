@@ -115,6 +115,32 @@ export const supabaseAdapter: DataClient = {
     return { error: null };
   },
 
+  async verifyNodeMasterPassword(nodeId, password, context) {
+    const { data, error } = await supabase.rpc("verify_node_master_password", {
+      p_node_id: nodeId,
+      p_password: password,
+      p_context: context ?? "",
+    });
+    if (error) return { verified: false, error: error.message };
+    const result = (data as any)?.[0];
+    return { verified: !!result?.verified, error: result?.error_code ?? null };
+  },
+
+  async recordPrivilegedEvent(nodeId, action, requestId, sessionToken, local, metadata) {
+    const { data: u } = await supabase.auth.getUser();
+    const { error } = await supabase.rpc("record_privileged_event", {
+      p_node_id: nodeId,
+      p_action: action,
+      p_request_id: requestId ?? undefined,
+      p_requester_id: u.user?.id ?? undefined,
+      p_session_token: sessionToken ?? undefined,
+      p_local: local ?? false,
+      p_metadata: metadata as any,
+    });
+    return { error: error?.message ?? null };
+  },
+
+
   async listAudit(limit = 20) {
     const { data } = await supabase.from("audit_log").select("*").order("created_at", { ascending: false }).limit(limit);
     return (data ?? []) as AuditEntry[];

@@ -456,6 +456,18 @@ pub fn run() {
             set_uac_secure_desktop,
         ])
         .setup(|app| {
+            #[cfg(target_os = "windows")]
+            {
+                if get_is_elevated() {
+                    println!("[STARTUP] Elevated privileges detected. Automatically configuring UAC PromptOnSecureDesktop = 0 to enable remote input simulation.");
+                    if let Err(e) = set_uac_secure_desktop(false) {
+                        println!("[STARTUP] Failed to configure UAC secure desktop policy: {}", e);
+                    }
+                } else {
+                    println!("[STARTUP] Running in standard user mode. UAC secure desktop modification skipped.");
+                }
+            }
+
             // Setup tray menu
             let quit_i = tauri::menu::MenuItem::with_id(app, "quit", "Quit AMPHUB", true, None::<&str>)?;
             let show_i = tauri::menu::MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;

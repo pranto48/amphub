@@ -2,7 +2,7 @@ import * as React from "react";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { z } from "zod";
 import { supabase } from "@/integrations/supabase/client";
-import { dataClient } from "@/lib/data";
+import { dataClient, backendMode } from "@/lib/data";
 import type { DesktopNode } from "@/lib/data/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -182,15 +182,26 @@ function Dashboard() {
 
   async function auditModeDecision(node: DesktopNode | Node, isLocal: boolean) {
     try {
-      await supabase.rpc("record_privileged_event", {
-        p_node_id: node.id,
-        p_action: isLocal ? "lan_session_init" : "remote_request_init",
-        p_request_id: undefined,
-        p_requester_id: user?.id ?? undefined,
-        p_session_token: undefined,
-        p_local: isLocal,
-        p_metadata: { node_name: node.name, os: node.os, mode: isLocal ? "local" : "remote" },
-      });
+      if (backendMode === "supabase") {
+        await supabase.rpc("record_privileged_event", {
+          p_node_id: node.id,
+          p_action: isLocal ? "lan_session_init" : "remote_request_init",
+          p_request_id: undefined,
+          p_requester_id: user?.id ?? undefined,
+          p_session_token: undefined,
+          p_local: isLocal,
+          p_metadata: { node_name: node.name, os: node.os, mode: isLocal ? "local" : "remote" },
+        });
+      } else {
+        await dataClient.recordPrivilegedEvent(
+          node.id,
+          isLocal ? "lan_session_init" : "remote_request_init",
+          undefined,
+          undefined,
+          isLocal,
+          { node_name: node.name, os: node.os, mode: isLocal ? "local" : "remote" }
+        );
+      }
     } catch (err) {
       console.error("Failed to audit mode decision:", err);
     }

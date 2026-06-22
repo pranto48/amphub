@@ -76,6 +76,8 @@ export interface DataClient {
   getNode(id: string): Promise<DesktopNode | null>;
   setNodeMasterPassword(nodeId: string, hash: string): Promise<{ error: string | null }>;
   updateNode(id: string, updates: Partial<{ name: string; remote_id: string; banned_until: string | null }>): Promise<{ error: string | null }>;
+  verifyNodeMasterPassword(nodeId: string, password: string, context?: string): Promise<{ verified: boolean; error: string | null }>;
+  recordPrivilegedEvent(nodeId: string, action: string, requestId?: string, sessionToken?: string, local?: boolean, metadata?: Record<string, unknown>): Promise<{ error: string | null }>;
 
   // ---- access requests ----
   createAccessRequest(nodeId: string): Promise<{ data: AccessRequest | null; error: string | null }>;

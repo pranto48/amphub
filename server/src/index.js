@@ -417,6 +417,42 @@ app.post("/api/nodes/:id/master-password", authRequired, adminOnly, async (req, 
   }
 });
 
+app.post("/api/nodes/:id/verify-password", authRequired, async (req, res) => {
+  const parsed = z.object({
+    password: z.string(),
+    context: z.string().optional()
+  }).safeParse(req.body);
+  
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+  const { password, context = "" } = parsed.data;
+  
+  try {
+    const node = await prisma.desktopNode.findUnique({
+      where: { id: req.params.id }
+    });
+    if (!node) return res.status(404).json({ error: "Node not found" });
+    if (!node.masterPasswordHash) return res.status(400).json({ error: "Master password not configured on this node" });
+    
+    // Hash input password with SHA-256 (matching frontend hashing behavior before setNodeMasterPassword)
+    const inputHash = crypto.createHash("sha256").update(password).digest("hex");
+    const verified = inputHash === node.masterPasswordHash;
+    
+    await prisma.actionLog.create({
+      data: {
+        actorId: req.user.id,
+        action: context || "verify_master_password",
+        target: node.id,
+        metadata: JSON.stringify({ verified })
+      }
+    });
+    logSecurityEvent(req.user.id, context || "verify_master_password", node.id, { verified });
+    
+    res.json({ verified });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ---------- access requests ----------
 app.post("/api/access-requests", authRequired, async (req, res) => {
   const parsed = z.object({ node_id: z.string().uuid() }).safeParse(req.body);
@@ -569,6 +605,35 @@ app.get("/api/audit", authRequired, adminOnly, async (req, res) => {
     created_at: l.createdAt
   }));
   res.json(rows);
+});
+
+app.post("/api/audit/privileged-event", authRequired, async (req, res) => {
+  const parsed = z.object({
+    nodeId: z.string().uuid(),
+    action: z.string(),
+    requestId: z.string().uuid().optional().nullable(),
+    sessionToken: z.string().optional().nullable(),
+    local: z.boolean().optional(),
+    metadata: z.record(z.any()).optional()
+  }).safeParse(req.body);
+
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+  const { nodeId, action, requestId, sessionToken, local = false, metadata = {} } = parsed.data;
+
+  try {
+    await prisma.actionLog.create({
+      data: {
+        actorId: req.user.id,
+        action,
+        target: nodeId,
+        metadata: JSON.stringify({ requestId, sessionToken, local, ...metadata })
+      }
+    });
+    logSecurityEvent(req.user.id, action, nodeId, { requestId, sessionToken, local, ...metadata });
+    res.status(204).end();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ---------- remote sessions ----------
