@@ -4,6 +4,7 @@ use enigo::{Enigo, MouseControllable, KeyboardControllable, MouseButton, Key};
 use arboard::Clipboard;
 use std::time::Duration;
 use screenshots::Screen;
+use tauri::Manager;
 
 mod signaling;
 mod streamer;
@@ -215,6 +216,16 @@ fn set_autostart_status(enabled: bool) -> Result<(), String> {
     }
     
     #[cfg(not(target_os = "windows"))]
+    Ok(())
+}
+
+#[tauri::command]
+fn show_app_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
     Ok(())
 }
 
