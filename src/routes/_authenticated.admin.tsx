@@ -330,6 +330,79 @@ function AdminPanel() {
 
   const load = React.useCallback(async () => {
     setLoading(true);
+    const isRest = backendMode === "rest";
+
+    if (isRest) {
+      try {
+        const token = session?.access_token || localStorage.getItem("remoteops_token");
+        const headers: Record<string, string> = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+
+        const [nodesRes, reqsRes, activeRes, auditRes] = await Promise.all([
+          fetch(`${API_BASE}/nodes`, { headers }).then(r => r.json() as Promise<any[]>),
+          fetch(`${API_BASE}/access-requests`, { headers }).then(r => r.json() as Promise<any[]>),
+          fetch(`${API_BASE}/v1/sessions/active`, { headers }).then(r => r.json() as Promise<any[]>),
+          fetch(`${API_BASE}/audit?limit=250`, { headers }).then(r => r.json() as Promise<any[]>),
+        ]);
+
+        const nodeMapping = Object.fromEntries((nodesRes || []).map((n: any) => [n.id || n.remote_id, n.name]));
+
+        const allRequests: ReqRow[] = (reqsRes || []).map((r: any) => ({
+          id: r.id,
+          node_id: r.node_id || r.nodeId,
+          requester_id: r.requester_id || r.requesterId,
+          requester_identity: r.requester_identity || r.requesterIdentity || null,
+          node_name: r.node_name || r.nodeName || nodeMapping[r.node_id || r.nodeId] || null,
+          location_hint: r.location_hint || r.locationHint || null,
+          status: (r.status || "pending").toLowerCase() as any,
+          requested_at: r.requested_at || r.requestedAt,
+          expires_at: r.expires_at || r.expiresAt || null,
+        }));
+
+        const allSessions: ActiveSession[] = (activeRes || []).map((s: any) => ({
+          id: s.id,
+          node_id: s.client_id || s.clientId,
+          requester_id: s.metadata?.controllerId || null,
+          started_at: s.requested_at || s.requestedAt,
+          last_seen_at: s.expires_at || s.expiresAt || s.requested_at || s.requestedAt,
+        }));
+
+        const auditLogs: Audit[] = (auditRes || []).map((a: any) => ({
+          id: a.id,
+          action: a.action,
+          event_type: a.event_type || a.eventType || null,
+          target: a.target || null,
+          actor_id: a.actor_id || a.actorId || null,
+          metadata: typeof a.metadata === "string" ? JSON.parse(a.metadata) : a.metadata || null,
+          created_at: a.created_at || a.createdAt,
+        }));
+
+        let userMapping: Record<string, RequesterInfo> = {};
+        try {
+          const usersRes = await fetch(`${API_BASE}/v1/admin/users`, { headers }).then(r => r.json() as Promise<any[]>);
+          userMapping = Object.fromEntries(
+            (usersRes || []).map((u: any) => [
+              u.id,
+              { email: u.email, role: (u.role || "user") as any } satisfies RequesterInfo
+            ])
+          );
+        } catch (e) {
+          console.warn("Failed to load user mapping in admin REST mode:", e);
+        }
+
+        setPending(allRequests.filter((r) => r.status === "pending"));
+        setApproved(allRequests.filter((r) => r.status === "approved"));
+        setNodeMap(nodeMapping);
+        setAudit(auditLogs);
+        setSessions(allSessions);
+        setRequesterMap(userMapping);
+        setLoading(false);
+      } catch (err: any) {
+        notify("error", "REST Load Failed", err.message);
+        setLoading(false);
+      }
+      return;
+    }
 
     const auditQuery = supabase
       .from("audit_log")
@@ -392,6 +465,32 @@ function AdminPanel() {
   async function decide(r: ReqRow, status: Extract<ReqStatus, "approved" | "denied" | "revoked">, mode: "once" | "timed" = "once") {
     if (!user) return;
     setDecisionBusyId(r.id);
+    const isRest = backendMode === "rest";
+
+    if (isRest) {
+      try {
+        const token = session?.access_token || localStorage.getItem("remoteops_token");
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+
+        const approve = status === "approved";
+        const res = await fetch(`${API_BASE}/access-requests/${r.id}/decision`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ approve })
+        });
+        if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+        
+        notify("success", "Decision saved", `${status.toUpperCase()} saved for node.`);
+        await load();
+      } catch (err: any) {
+        notify("error", "Decision failed", err.message);
+      } finally {
+        setDecisionBusyId(null);
+      }
+      return;
+    }
+
     const expiresAt = status !== "approved" ? null : mode === "timed" ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : null;
 
     const { error } = await supabase
@@ -414,9 +513,34 @@ function AdminPanel() {
     await load();
   }
 
-  async function terminateSession(session: ActiveSession) {
+  async function terminateSession(sessionItem: ActiveSession) {
     if (!user) return;
-    setSessionBusyId(session.id);
+    setSessionBusyId(sessionItem.id);
+    const isRest = backendMode === "rest";
+
+    if (isRest) {
+      try {
+        const token = session?.access_token || localStorage.getItem("remoteops_token");
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+
+        const res = await fetch(`${API_BASE}/v1/sessions/revoke`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ requestId: sessionItem.id })
+        });
+        if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+        
+        notify("warning", "Session terminated", `Session ${sessionItem.id.slice(0, 8)} was terminated.`);
+        await load();
+      } catch (err: any) {
+        notify("error", "Terminate failed", err.message);
+      } finally {
+        setSessionBusyId(null);
+      }
+      return;
+    }
+
     const { error } = await supabase
       .from("active_sessions")
       .update({
@@ -424,7 +548,7 @@ function AdminPanel() {
         terminated_by: user.id,
         termination_reason: "admin_forced_terminate",
       })
-      .eq("id", session.id)
+      .eq("id", sessionItem.id)
       .is("ended_at", null)
       .is("terminated_at", null);
 
@@ -434,7 +558,7 @@ function AdminPanel() {
       return;
     }
 
-    notify("warning", "Session terminated", `Session ${session.id.slice(0, 8)} was terminated.`);
+    notify("warning", "Session terminated", `Session ${sessionItem.id.slice(0, 8)} was terminated.`);
     await load();
   }
 
@@ -548,6 +672,17 @@ function AdminPanel() {
 
   React.useEffect(() => {
     if (!isAdmin) return;
+    const isRest = backendMode === "rest";
+
+    if (isRest) {
+      const unsub = dataClient.subscribe((event) => {
+        void load();
+      });
+      return () => {
+        unsub();
+      };
+    }
+
     const channel = supabase
       .channel("admin-changes")
       .on("postgres_changes", { event: "*", schema: "public", table: "access_requests" }, () => {

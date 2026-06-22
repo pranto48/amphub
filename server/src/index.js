@@ -574,11 +574,13 @@ app.post("/api/v1/sessions/request", async (req, res) => {
         JWT_SECRET
       );
 
+      const localMetadata = { ...enrichedMetadata, isLocal: true };
+
       const session = await prisma.remoteSession.create({
         data: {
           id: requestId,
           clientId,
-          metadata: JSON.stringify(enrichedMetadata),
+          metadata: JSON.stringify(localMetadata),
           status: "APPROVED",
           approvedAt,
           expiresAt,
@@ -590,7 +592,7 @@ app.post("/api/v1/sessions/request", async (req, res) => {
         id: session.id,
         client_id: session.clientId,
         status: session.status,
-        metadata: enrichedMetadata,
+        metadata: localMetadata,
         requested_at: session.requestedAt,
         approved_at: session.approvedAt,
         expires_at: session.expiresAt,
@@ -598,7 +600,7 @@ app.post("/api/v1/sessions/request", async (req, res) => {
       };
 
       logSecurityEvent(null, "session_auto_approve_local", clientId, { ip: clientIp, targetIp });
-      broadcast({ table: "RemoteSessions", type: "INSERT", row });
+      // Do NOT broadcast to wssDashboard to avoid showing local IP approvals on the admin panel
 
       // Notify the standby host client immediately
       const hostWs = activeClients.get(clientId);
@@ -784,7 +786,16 @@ app.get("/api/v1/sessions/active", authRequired, adminOnly, async (req, res) => 
       },
       orderBy: { approvedAt: "desc" }
     });
-    const rows = sessions.map(s => ({
+    const filteredSessions = sessions.filter(s => {
+      try {
+        const meta = JSON.parse(s.metadata || "{}");
+        return !meta.isLocal;
+      } catch {
+        return true;
+      }
+    });
+
+    const rows = filteredSessions.map(s => ({
       id: s.id,
       client_id: s.clientId,
       status: s.status,
@@ -1806,6 +1817,26 @@ signalingServer.on("upgrade", async (req, socket, head) => {
     }
     broadcast({ table: "ConnectedClients", type: "UPDATE" });
 
+    // Notify peers in the same session about client join
+    if (ws.requestId) {
+      for (const peer of signalingSockets) {
+        if (peer !== ws && peer.requestId === ws.requestId) {
+          // Send to existing peer that this new peer joined
+          peer.send(JSON.stringify({
+            type: "peer_joined",
+            peerId: ws.uniqueClientId,
+            role: ws.isHost ? "host" : "controller"
+          }));
+          // Send to new peer that the existing peer is here
+          ws.send(JSON.stringify({
+            type: "peer_joined",
+            peerId: peer.uniqueClientId,
+            role: peer.isHost ? "host" : "controller"
+          }));
+        }
+      }
+    }
+
     const remainingMs = (payload.exp * 1000) - Date.now();
     const expirationTimer = setTimeout(async () => {
       console.warn(`[SESSION] Forcefully terminating connection for session request ${payload.requestId}`);
@@ -1916,6 +1947,15 @@ signalingServer.on("upgrade", async (req, socket, head) => {
             // Look up target WebSocket strictly using activeClients Map
             const targetWs = activeClients.get(targetClientId);
             if (targetWs) {
+              if (targetWs.isStandby || ws.isStandby) {
+                console.warn(`[SIGNAL BLOCK] Blocked ${messageObj.type} from ${ws.uniqueClientId} to ${targetClientId} due to standby mode.`);
+                ws.send(JSON.stringify({
+                  type: "error",
+                  error: "Cannot establish remote stream: target client is in standby mode.",
+                  target: targetClientId
+                }));
+                return;
+              }
               // Route exclusively to targetWs — do NOT reflect back to sender or broadcast
               targetWs.send(messageString);
             } else {

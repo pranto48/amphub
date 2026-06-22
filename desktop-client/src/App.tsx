@@ -295,8 +295,7 @@ function App() {
       if (sessionRole === "controller") {
         // Controller role: act as pure WebRTC receiver.
         // Do NOT call start_desktop_stream — that would loopback our own screen.
-        addLog("[CONTROLLER] Role confirmed by server. Skipping local screen capture. Initiating WebRTC offer as receiver.");
-        initiateWebRTCOffer();
+        addLog("[CONTROLLER] Role confirmed by server. Awaiting remote host peer connection to initiate WebRTC offer.");
       } else if (sessionRole === "host") {
         // Host role: capture local screen and stream tracks to the controller.
         addLog("[HOST] Role confirmed by server. Starting local screen capture loop for streaming.");
@@ -345,6 +344,14 @@ function App() {
             if (data.type === "role_assignment") {
               setSessionRole(data.role);
               addLog(`[Role Assignment] Server assigned role: ${data.role.toUpperCase()}`);
+            } else if (data.type === "peer_joined") {
+              addLog(`[Session] Peer connected: ${data.peerId} (${data.role})`);
+              // Check current sessionRole state or read it from closure
+              // (Note: inside this listener, sessionRole might be stale, so we can check data.role === "host")
+              if (data.role === "host") {
+                addLog("[CONTROLLER] Host peer is now online. Negotiating WebRTC peer connection...");
+                initiateWebRTCOffer();
+              }
             } else if (data.type === "admin_request" || data.action === "admin_request") {
               // Always show incoming permission request modal on the client host for all connections,
               // including local subnet connections. Admin bypass applies to the Docker server side,
