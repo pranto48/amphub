@@ -800,6 +800,25 @@ app.get("/api/v1/sessions/active", authRequired, adminOnly, async (req, res) => 
   }
 });
 
+app.get("/api/v1/admin/clients", authRequired, adminOnly, async (req, res) => {
+  try {
+    const clients = [];
+    for (const [clientId, ws] of activeClients.entries()) {
+      clients.push({
+        clientId: clientId,
+        ip: ws.remoteIp || "127.0.0.1",
+        isHost: !!ws.isHost,
+        isStandby: !!ws.isStandby,
+        isController: !!ws.isController,
+        connectedAt: ws.connectedAt || new Date().toISOString()
+      });
+    }
+    res.json(clients);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get("/api/v1/sessions/status/:id", async (req, res) => {
   try {
     const session = await prisma.remoteSession.findUnique({
@@ -1649,6 +1668,7 @@ signalingServer.on("upgrade", async (req, socket, head) => {
         ws.isHost = true;
         ws.isStandby = true;
         ws.uniqueClientId = myId;
+        ws.connectedAt = new Date().toISOString();
         
         // Use resolveClientIp-equivalent logic for raw Node.js upgrade requests
         const _xff_s = req.headers["x-forwarded-for"];
@@ -1662,15 +1682,18 @@ signalingServer.on("upgrade", async (req, socket, head) => {
         activeClients.set(myId, ws);
         console.log(`[STANDBY] Client ${myId} connected as standby host from ${parsedIp}.`);
         ws.send(JSON.stringify({ type: "role_assignment", role: "host" }));
-
+        broadcast({ table: "ConnectedClients", type: "UPDATE" });
+ 
         ws.on("close", () => {
           signalingSockets.delete(ws);
           activeClients.delete(myId);
           console.log(`[STANDBY] Client ${myId} disconnected.`);
+          broadcast({ table: "ConnectedClients", type: "UPDATE" });
         });
         ws.on("error", () => {
           signalingSockets.delete(ws);
           activeClients.delete(myId);
+          broadcast({ table: "ConnectedClients", type: "UPDATE" });
         });
       });
       return;
@@ -1758,6 +1781,7 @@ signalingServer.on("upgrade", async (req, socket, head) => {
     ws.token = token;
     ws.myId = myId;
     ws.uniqueClientId = myId;
+    ws.connectedAt = new Date().toISOString();
 
     // Use resolveClientIp-equivalent logic for raw Node.js upgrade requests
     const _xff_a = req.headers["x-forwarded-for"];
@@ -1780,6 +1804,7 @@ signalingServer.on("upgrade", async (req, socket, head) => {
       console.log(`[SESSION] Controller ${myId} joined active session ${payload.requestId} from ${parsedIp}`);
       ws.send(JSON.stringify({ type: "role_assignment", role: "controller" }));
     }
+    broadcast({ table: "ConnectedClients", type: "UPDATE" });
 
     const remainingMs = (payload.exp * 1000) - Date.now();
     const expirationTimer = setTimeout(async () => {
@@ -1828,6 +1853,7 @@ signalingServer.on("upgrade", async (req, socket, head) => {
               ws.clientId = clientId;
               activeClients.set(clientId, ws);
               console.log(`[REGISTER] Client ${clientId} registered successfully.`);
+              broadcast({ table: "ConnectedClients", type: "UPDATE" });
             }
             return;
           }
@@ -1926,6 +1952,7 @@ signalingServer.on("upgrade", async (req, socket, head) => {
         activeClients.delete(ws.uniqueClientId);
       }
       console.log(`[SESSION] Client ${myId || "unknown"} disconnected from session ${payload.requestId}`);
+      broadcast({ table: "ConnectedClients", type: "UPDATE" });
     });
     ws.on("error", () => {
       clearTimeout(expirationTimer);
@@ -1933,6 +1960,7 @@ signalingServer.on("upgrade", async (req, socket, head) => {
       if (ws.uniqueClientId) {
         activeClients.delete(ws.uniqueClientId);
       }
+      broadcast({ table: "ConnectedClients", type: "UPDATE" });
     });
   });
 });
