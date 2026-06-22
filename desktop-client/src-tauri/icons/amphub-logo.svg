@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Dark glossy background gradient -->
+    <radialGradient id="bg-grad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1e1b4b" />
+      <stop offset="100%" stop-color="#030712" />
+    </radialGradient>
+    
+    <!-- Rose to Orange brand gradient -->
+    <linearGradient id="brand-grad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#fb7185" />
+      <stop offset="50%" stop-color="#f43f5e" />
+      <stop offset="100%" stop-color="#fb923c" />
+    </linearGradient>
+
+    <!-- Subtle glow filter -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="10" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Background Base -->
+  <rect width="512" height="512" rx="128" fill="url(#bg-grad)" />
+  <rect x="4" y="4" width="504" height="504" rx="124" fill="none" stroke="url(#brand-grad)" stroke-width="3" opacity="0.4" />
+
+  <!-- Stylized Geometric AMPHUB Icon -->
+  <g transform="translate(106, 96)" filter="url(#glow)">
+    <!-- Main stylized 'A' arches and network node -->
+    <!-- Left/Right legs -->
+    <path d="M60 270 L140 50 Q150 30 160 50 L240 270" fill="none" stroke="url(#brand-grad)" stroke-width="32" stroke-linecap="round" stroke-linejoin="round" />
+    
+    <!-- Central connection node / gateway loop -->
+    <circle cx="150" cy="170" r="40" fill="#030712" stroke="url(#brand-grad)" stroke-width="18" />
+    <circle cx="150" cy="170" r="14" fill="url(#brand-grad)" />
+    
+    <!-- Horizontal connection beam -->
+    <path d="M40 200 L260 200" fill="none" stroke="url(#brand-grad)" stroke-width="14" stroke-linecap="round" opacity="0.8" />
+  </g>
+</svg>
