@@ -62,7 +62,42 @@ function App() {
   const [discoveryEnabled, setDiscoveryEnabled] = useState(true);
   const [isElevated, setIsElevated] = useState(false);
   const [uacSecureDesktop, setUacSecureDesktop] = useState(true);
+  const [visualHelper, setVisualHelper] = useState<"hide" | "show" | "showOnMovement">(() => {
+    return (localStorage.getItem("amphub_visual_helper") as any) || "showOnMovement";
+  });
+  const [followRemoteCursor, setFollowRemoteCursor] = useState(() => {
+    return localStorage.getItem("amphub_follow_remote_cursor") === "true";
+  });
+  const [followWindowFocus, setFollowWindowFocus] = useState(() => {
+    return localStorage.getItem("amphub_follow_window_focus") === "true";
+  });
+  const [showMoveSizeHelper, setShowMoveSizeHelper] = useState(() => {
+    return localStorage.getItem("amphub_show_move_size_helper") === "true";
+  });
+  
+  const [viewMode, setViewMode] = useState<"original" | "optimizeDisplay" | "optimizeScreen">(() => {
+    return (localStorage.getItem("amphub_view_mode") as any) || "optimizeDisplay";
+  });
+  const [startFullScreen, setStartFullScreen] = useState(() => {
+    return localStorage.getItem("amphub_start_full_screen") === "true";
+  });
+  const [useEdgeScrolling, setUseEdgeScrolling] = useState(() => {
+    return localStorage.getItem("amphub_use_edge_scrolling") === "true";
+  });
+  const [exclusiveFullScreen, setExclusiveFullScreen] = useState(() => {
+    const val = localStorage.getItem("amphub_exclusive_full_screen");
+    return val === null ? true : val === "true";
+  });
+
+  const [hardwareAcceleration, setHardwareAcceleration] = useState<"opengl" | "direct3d" | "directdraw" | "disable">(() => {
+    return (localStorage.getItem("amphub_hardware_acceleration") as any) || "direct3d";
+  });
+  const [use16BitRenderer, setUse16BitRenderer] = useState(() => {
+    return localStorage.getItem("amphub_use_16bit_renderer") === "true";
+  });
   const [recentConnections, setRecentConnections] = useState<string[]>([]);
+  const [showMovementCursor, setShowMovementCursor] = useState(true);
+  const cursorMovementTimeoutRef = useRef<any>(null);
   const [logs, setLogs] = useState<string[]>([
     "AMPHUB Core Client initialized.",
     `Mode: ${isTauri ? "AMPHUB Windows Client" : "Standard Browser Environment (Simulation Enabled)"}`
@@ -291,6 +326,39 @@ function App() {
     }
   }, []);
 
+  // Save settings when they change
+  useEffect(() => {
+    localStorage.setItem("amphub_visual_helper", visualHelper);
+  }, [visualHelper]);
+  useEffect(() => {
+    localStorage.setItem("amphub_follow_remote_cursor", String(followRemoteCursor));
+  }, [followRemoteCursor]);
+  useEffect(() => {
+    localStorage.setItem("amphub_follow_window_focus", String(followWindowFocus));
+  }, [followWindowFocus]);
+  useEffect(() => {
+    localStorage.setItem("amphub_show_move_size_helper", String(showMoveSizeHelper));
+  }, [showMoveSizeHelper]);
+  useEffect(() => {
+    localStorage.setItem("amphub_view_mode", viewMode);
+  }, [viewMode]);
+  useEffect(() => {
+    localStorage.setItem("amphub_start_full_screen", String(startFullScreen));
+  }, [startFullScreen]);
+  useEffect(() => {
+    localStorage.setItem("amphub_use_edge_scrolling", String(useEdgeScrolling));
+  }, [useEdgeScrolling]);
+  useEffect(() => {
+    localStorage.setItem("amphub_exclusive_full_screen", String(exclusiveFullScreen));
+  }, [exclusiveFullScreen]);
+  useEffect(() => {
+    localStorage.setItem("amphub_hardware_acceleration", hardwareAcceleration);
+  }, [hardwareAcceleration]);
+  useEffect(() => {
+    localStorage.setItem("amphub_use_16bit_renderer", String(use16BitRenderer));
+  }, [use16BitRenderer]);
+
+
   const saveRecentConnection = (id: string) => {
     const cleanId = id.trim().toUpperCase();
     if (!cleanId) return;
@@ -372,6 +440,23 @@ function App() {
     }
   };
 
+  const toggleUacSecureDesktop = async () => {
+    const nextVal = !uacSecureDesktop;
+    if (!isTauri) {
+      setUacSecureDesktop(nextVal);
+      addLog(`[Mock] Toggled UAC Secure Desktop setting to: ${nextVal ? "Enabled" : "Disabled"}`);
+      return;
+    }
+    try {
+      await safeInvoke("set_uac_secure_desktop", { enabled: nextVal });
+      setUacSecureDesktop(nextVal);
+      addLog(`${nextVal ? "Enabled" : "Disabled"} Windows UAC Secure Desktop.`);
+    } catch (err: any) {
+      addLog(`Failed to update UAC Secure Desktop: ${err}`);
+      alert(err);
+    }
+  };
+
   // Auto-establish standby signaling connection on startup when not in mock mode
   useEffect(() => {
     if (myId && myId !== "Loading..." && myId !== "AMP-ERR-999") {
@@ -417,6 +502,10 @@ function App() {
         // Controller role: act as pure WebRTC receiver.
         // Do NOT call start_desktop_stream — that would loopback our own screen.
         addLog("[CONTROLLER] Role confirmed by server. Awaiting remote host peer connection to initiate WebRTC offer.");
+        if (startFullScreen) {
+          setIsFullScreen(true);
+          addLog("[View Mode] Automatically entering full screen session.");
+        }
       } else if (sessionRole === "host") {
         // Host role: capture local screen and stream tracks to the controller.
         addLog("[HOST] Role confirmed by server. Starting local screen capture loop for streaming.");
@@ -898,6 +987,29 @@ function App() {
     }
   };
 
+  const getCursorClass = () => {
+    if (visualHelper === "hide") return "cursor-none";
+    if (visualHelper === "show") return "cursor-default";
+    return showMovementCursor ? "cursor-default" : "cursor-none";
+  };
+
+  const getViewportClass = () => {
+    const base = isFullScreen 
+      ? "fixed inset-0 z-50 bg-black w-screen h-screen flex items-center justify-center outline-none" 
+      : "aspect-video bg-neutral-900 relative border-t border-slate-800 outline-none flex items-center justify-center group select-none";
+    const overflowClass = viewMode === "original" ? "overflow-auto" : "overflow-hidden";
+    const cursorClass = getCursorClass();
+    return `${base} ${overflowClass} ${cursorClass}`;
+  };
+
+  const getObjectFitClass = () => {
+    if (viewMode === "optimizeDisplay") return "object-contain w-full h-full";
+    if (viewMode === "optimizeScreen") return "object-fill w-full h-full";
+    // "original"
+    return "object-none";
+  };
+
+
   const executeTermCommand = (e: React.FormEvent) => {
     e.preventDefault();
     if (!simulatedTermInput.trim()) return;
@@ -1327,11 +1439,7 @@ function App() {
                       onMouseMove={(e) => handleScreenInteraction(e, "move")}
                       onContextMenu={(e) => { e.preventDefault(); handleScreenInteraction(e, "rightclick"); }}
                       onKeyDown={(e) => handleKeyPress(e)}
-                      className={`${
-                        isFullScreen 
-                          ? "fixed inset-0 z-50 bg-black w-screen h-screen flex items-center justify-center outline-none cursor-default" 
-                          : "aspect-video bg-neutral-900 relative cursor-default overflow-hidden group select-none flex items-center justify-center border-t border-slate-800 outline-none"
-                      }`}
+                      className={getViewportClass()}
                     >
                       {isFullScreen && (
                         <button
@@ -1423,7 +1531,7 @@ function App() {
                               );
                             }
                           }}
-                          className="w-full h-full object-contain"
+                          className={getObjectFitClass()}
                           autoPlay
                           playsInline
                           muted
