@@ -51,11 +51,13 @@ function App() {
   const [incomingRequest, setIncomingRequest] = useState<{ ip: string; token?: string; requestId?: string } | null>(null);
   const [remoteStreamObject, setRemoteStreamObject] = useState<MediaStream | null>(null);
   const [isFullScreen, setIsFullScreen] = useState(false);
-  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const lastMoveSentRef = useRef<number>(0);
   const [isSignalingServerReachable, setIsSignalingServerReachable] = useState<boolean | null>(null);
   const [autostartEnabled, setAutostartEnabled] = useState(false);
+  const [recentConnections, setRecentConnections] = useState<string[]>([]);
   const [logs, setLogs] = useState<string[]>([
     "AMPHUB Core Client initialized.",
     `Mode: ${isTauri ? "AMPHUB Windows Client" : "Standard Browser Environment (Simulation Enabled)"}`
@@ -234,6 +236,47 @@ function App() {
         });
     }
   }, []);
+
+  // Load recent connections on startup
+  useEffect(() => {
+    try {
+      const list = JSON.parse(localStorage.getItem("amphub_recent_connections") || "[]");
+      setRecentConnections(list);
+    } catch (e) {
+      setRecentConnections([]);
+    }
+  }, []);
+
+  const saveRecentConnection = (id: string) => {
+    const cleanId = id.trim().toUpperCase();
+    if (!cleanId) return;
+    try {
+      const list = JSON.parse(localStorage.getItem("amphub_recent_connections") || "[]");
+      const updated = [cleanId, ...list.filter((x: string) => x !== cleanId)].slice(0, 6);
+      localStorage.setItem("amphub_recent_connections", JSON.stringify(updated));
+      setRecentConnections(updated);
+    } catch (e) {
+      console.error("Failed to save recent connection:", e);
+    }
+  };
+
+  const removeRecentConnection = (id: string) => {
+    try {
+      const list = JSON.parse(localStorage.getItem("amphub_recent_connections") || "[]");
+      const updated = list.filter((x: string) => x !== id);
+      localStorage.setItem("amphub_recent_connections", JSON.stringify(updated));
+      setRecentConnections(updated);
+    } catch (e) {
+      console.error("Failed to remove recent connection:", e);
+    }
+  };
+
+  // Auto-save connection on successful connection
+  useEffect(() => {
+    if (connectionStatus === "Connected" && sessionRole === "controller" && targetId) {
+      saveRecentConnection(targetId);
+    }
+  }, [connectionStatus, sessionRole, targetId]);
 
   const toggleAutostart = async () => {
     const nextVal = !autostartEnabled;
