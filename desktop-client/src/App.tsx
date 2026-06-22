@@ -1541,7 +1541,7 @@ function App() {
                         <img 
                           src={remoteScreen.startsWith("iVBOR") ? `data:image/png;base64,${remoteScreen}` : `data:image/jpeg;base64,${remoteScreen}`}
                           alt="Remote monitor display stream"
-                          className="w-full h-full object-contain"
+                          className={getObjectFitClass()}
                         />
                       ) : (
                         <div className="text-slate-500 text-sm font-semibold flex flex-col items-center gap-2">
@@ -1777,6 +1777,374 @@ function App() {
                   >
                     Simulate Incoming Access Request
                   </button>
+                </div>
+              </div>
+
+              {/* Windows UAC & Administrator Elevation Control */}
+              <div className="bg-slate-900/50 rounded-2xl border border-slate-800 p-6 space-y-4">
+                <div className="flex items-center gap-2">
+                  <svg className="w-5 h-5 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                  </svg>
+                  <h3 className="text-base font-extrabold text-white">UAC &amp; Administrator Elevation</h3>
+                </div>
+                <p className="text-xs text-slate-400">
+                  Verify application privileges and configure Windows User Account Control (UAC) Secure Desktop settings to allow remote input on prompt windows.
+                </p>
+
+                <div className="space-y-4 pt-3 border-t border-slate-800/80">
+                  {/* Elevation Status */}
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-slate-400 font-semibold">Elevation Privilege Status:</span>
+                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
+                      isElevated ? "bg-emerald-950/60 border border-emerald-900 text-emerald-400" : "bg-rose-950/60 border border-rose-900 text-rose-400 animate-pulse"
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${isElevated ? "bg-emerald-400" : "bg-rose-400"}`}></span>
+                      {isElevated ? "Elevated (Administrator Mode)" : "Limited Privilege (User Mode)"}
+                    </span>
+                  </div>
+                  {!isElevated && (
+                    <div className="bg-rose-950/20 border border-rose-900/40 rounded-xl p-3.5 text-[11px] text-rose-400 leading-relaxed">
+                      <strong>Warning:</strong> AMPHUB is not running as Administrator. When a UAC prompt is displayed, or when elevated programs (like CMD as Admin, Task Manager) are focused, input injection will fail. Please run the AMPHUB executable as Administrator.
+                    </div>
+                  )}
+
+                  {/* UAC Secure Desktop Toggle */}
+                  <div className="flex justify-between items-center pt-3 border-t border-slate-800/40">
+                    <div>
+                      <span className="text-sm font-semibold text-slate-300 block">UAC Secure Desktop</span>
+                      <span className="text-[10px] text-slate-500 max-w-[450px] block">
+                        Disable secure desktop isolation for UAC prompts so that AMPHUB's input simulation (clicks, typing) can reach the Yes/No buttons. (Requires Administrator Mode)
+                      </span>
+                    </div>
+                    <button
+                      onClick={toggleUacSecureDesktop}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${!uacSecureDesktop ? "bg-rose-600" : "bg-slate-800"}`}
+                    >
+                      <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${!uacSecureDesktop ? "translate-x-5" : "translate-x-0"}`}></span>
+                    </button>
+                  </div>
+                  <div className="text-[10px] text-slate-500 bg-slate-950/50 p-2.5 rounded-xl border border-slate-850">
+                    Status: {uacSecureDesktop ? "Secure Desktop ON (standard Windows behavior - blocks remote control on prompts)" : "Secure Desktop OFF (prompts rendered on normal desktop - remote control is functional)"}
+                  </div>
+                </div>
+              </div>
+
+              {/* Remote Session & Performance Preferences */}
+              <div className="bg-slate-900/50 rounded-2xl border border-slate-800 p-6 space-y-6">
+                <div className="flex items-center gap-2 pb-3 border-b border-slate-800/80">
+                  <svg className="w-5 h-5 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
+                  </svg>
+                  <h3 className="text-base font-extrabold text-white">Session Preferences &amp; Performance</h3>
+                </div>
+
+                {/* Visual Helpers Section */}
+                <div className="space-y-3">
+                  <div className="border-b border-slate-800/60 pb-1.5 mb-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Visual Helpers</span>
+                  </div>
+                  <div className="space-y-2">
+                    <div 
+                      onClick={() => setVisualHelper("hide")}
+                      className="flex items-center gap-3 cursor-pointer select-none py-1 group"
+                    >
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${
+                        visualHelper === "hide" ? "border-rose-500 bg-slate-950" : "border-slate-700 bg-slate-950 group-hover:border-slate-500"
+                      }`}>
+                        {visualHelper === "hide" && <div className="w-2.5 h-2.5 rounded-full bg-rose-500" />}
+                      </div>
+                      <span className={`text-xs font-semibold ${visualHelper === "hide" ? "text-slate-200" : "text-slate-400 group-hover:text-slate-300"}`}>
+                        Hide remote cursor
+                      </span>
+                    </div>
+                    
+                    <div 
+                      onClick={() => setVisualHelper("show")}
+                      className="flex items-center gap-3 cursor-pointer select-none py-1 group"
+                    >
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${
+                        visualHelper === "show" ? "border-rose-500 bg-slate-950" : "border-slate-700 bg-slate-950 group-hover:border-slate-500"
+                      }`}>
+                        {visualHelper === "show" && <div className="w-2.5 h-2.5 rounded-full bg-rose-500" />}
+                      </div>
+                      <span className={`text-xs font-semibold ${visualHelper === "show" ? "text-slate-200" : "text-slate-400 group-hover:text-slate-300"}`}>
+                        Show remote cursor
+                      </span>
+                    </div>
+                    
+                    <div 
+                      onClick={() => setVisualHelper("showOnMovement")}
+                      className="flex items-center gap-3 cursor-pointer select-none py-1 group"
+                    >
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${
+                        visualHelper === "showOnMovement" ? "border-rose-500 bg-slate-950" : "border-slate-700 bg-slate-950 group-hover:border-slate-500"
+                      }`}>
+                        {visualHelper === "showOnMovement" && <div className="w-2.5 h-2.5 rounded-full bg-rose-500" />}
+                      </div>
+                      <span className={`text-xs font-semibold ${visualHelper === "showOnMovement" ? "text-slate-200" : "text-slate-400 group-hover:text-slate-300"}`}>
+                        Show remote cursor on movement
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 pt-2 border-t border-slate-950/40">
+                    <div 
+                      onClick={() => setFollowRemoteCursor(!followRemoteCursor)}
+                      className="flex items-center gap-3 cursor-pointer select-none py-1 group"
+                    >
+                      <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
+                        followRemoteCursor ? "border-rose-500 bg-rose-500/10" : "border-slate-700 bg-slate-950 group-hover:border-slate-500"
+                      }`}>
+                        {followRemoteCursor && (
+                          <svg className="w-3 h-3 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
+                      <span className={`text-xs font-semibold ${followRemoteCursor ? "text-slate-200" : "text-slate-400 group-hover:text-slate-300"}`}>
+                        Follow remote cursor
+                      </span>
+                    </div>
+
+                    <div 
+                      onClick={() => setFollowWindowFocus(!followWindowFocus)}
+                      className="flex items-center gap-3 cursor-pointer select-none py-1 group"
+                    >
+                      <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
+                        followWindowFocus ? "border-rose-500 bg-rose-500/10" : "border-slate-700 bg-slate-950 group-hover:border-slate-500"
+                      }`}>
+                        {followWindowFocus && (
+                          <svg className="w-3 h-3 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
+                      <span className={`text-xs font-semibold ${followWindowFocus ? "text-slate-200" : "text-slate-400 group-hover:text-slate-300"}`}>
+                        Follow remote window focus
+                      </span>
+                    </div>
+
+                    <div 
+                      onClick={() => setShowMoveSizeHelper(!showMoveSizeHelper)}
+                      className="flex items-center gap-3 cursor-pointer select-none py-1 group"
+                    >
+                      <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
+                        showMoveSizeHelper ? "border-rose-500 bg-rose-500/10" : "border-slate-700 bg-slate-950 group-hover:border-slate-500"
+                      }`}>
+                        {showMoveSizeHelper && (
+                          <svg className="w-3 h-3 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
+                      <span className={`text-xs font-semibold ${showMoveSizeHelper ? "text-slate-200" : "text-slate-400 group-hover:text-slate-300"}`}>
+                        Show move/size helper
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* View Mode Section */}
+                <div className="space-y-3 pt-4 border-t border-slate-800/80">
+                  <div className="border-b border-slate-800/60 pb-1.5 mb-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-400">View Mode</span>
+                  </div>
+                  <div className="space-y-2">
+                    <div 
+                      onClick={() => setViewMode("original")}
+                      className="flex items-center gap-3 cursor-pointer select-none py-1 group"
+                    >
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${
+                        viewMode === "original" ? "border-rose-500 bg-slate-950" : "border-slate-700 bg-slate-950 group-hover:border-slate-500"
+                      }`}>
+                        {viewMode === "original" && <div className="w-2.5 h-2.5 rounded-full bg-rose-500" />}
+                      </div>
+                      <span className={`text-xs font-semibold ${viewMode === "original" ? "text-slate-200" : "text-slate-400 group-hover:text-slate-300"}`}>
+                        Original
+                      </span>
+                    </div>
+                    
+                    <div 
+                      onClick={() => setViewMode("optimizeDisplay")}
+                      className="flex items-center gap-3 cursor-pointer select-none py-1 group"
+                    >
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${
+                        viewMode === "optimizeDisplay" ? "border-rose-500 bg-slate-950" : "border-slate-700 bg-slate-950 group-hover:border-slate-500"
+                      }`}>
+                        {viewMode === "optimizeDisplay" && <div className="w-2.5 h-2.5 rounded-full bg-rose-500" />}
+                      </div>
+                      <span className={`text-xs font-semibold ${viewMode === "optimizeDisplay" ? "text-slate-200" : "text-slate-400 group-hover:text-slate-300"}`}>
+                        Optimize display (shrink)
+                      </span>
+                    </div>
+                    
+                    <div 
+                      onClick={() => setViewMode("optimizeScreen")}
+                      className="flex items-center gap-3 cursor-pointer select-none py-1 group"
+                    >
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${
+                        viewMode === "optimizeScreen" ? "border-rose-500 bg-slate-950" : "border-slate-700 bg-slate-950 group-hover:border-slate-500"
+                      }`}>
+                        {viewMode === "optimizeScreen" && <div className="w-2.5 h-2.5 rounded-full bg-rose-500" />}
+                      </div>
+                      <span className={`text-xs font-semibold ${viewMode === "optimizeScreen" ? "text-slate-200" : "text-slate-400 group-hover:text-slate-300"}`}>
+                        Optimize screen usage (stretch)
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 pt-2 border-t border-slate-950/40">
+                    <div 
+                      onClick={() => setStartFullScreen(!startFullScreen)}
+                      className="flex items-center gap-3 cursor-pointer select-none py-1 group"
+                    >
+                      <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
+                        startFullScreen ? "border-rose-500 bg-rose-500/10" : "border-slate-700 bg-slate-950 group-hover:border-slate-500"
+                      }`}>
+                        {startFullScreen && (
+                          <svg className="w-3 h-3 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
+                      <span className={`text-xs font-semibold ${startFullScreen ? "text-slate-200" : "text-slate-400 group-hover:text-slate-300"}`}>
+                        Start new sessions in full-screen mode
+                      </span>
+                    </div>
+
+                    <div 
+                      onClick={() => setUseEdgeScrolling(!useEdgeScrolling)}
+                      className="flex items-center gap-3 cursor-pointer select-none py-1 group"
+                    >
+                      <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
+                        useEdgeScrolling ? "border-rose-500 bg-rose-500/10" : "border-slate-700 bg-slate-950 group-hover:border-slate-500"
+                      }`}>
+                        {useEdgeScrolling && (
+                          <svg className="w-3 h-3 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
+                      <span className={`text-xs font-semibold ${useEdgeScrolling ? "text-slate-200" : "text-slate-400 group-hover:text-slate-300"}`}>
+                        Use edge scrolling in original view mode
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 pt-2 border-t border-slate-950/40">
+                    <div 
+                      onClick={() => setExclusiveFullScreen(true)}
+                      className="flex items-center gap-3 cursor-pointer select-none py-1 group"
+                    >
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${
+                        exclusiveFullScreen ? "border-rose-500 bg-slate-950" : "border-slate-700 bg-slate-950 group-hover:border-slate-500"
+                      }`}>
+                        {exclusiveFullScreen && <div className="w-2.5 h-2.5 rounded-full bg-rose-500" />}
+                      </div>
+                      <span className={`text-xs font-semibold ${exclusiveFullScreen ? "text-slate-200" : "text-slate-400 group-hover:text-slate-300"}`}>
+                        Exclusive full-screen mode
+                      </span>
+                    </div>
+                    
+                    <div 
+                      onClick={() => setExclusiveFullScreen(false)}
+                      className="flex items-center gap-3 cursor-pointer select-none py-1 group"
+                    >
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${
+                        !exclusiveFullScreen ? "border-rose-500 bg-slate-950" : "border-slate-700 bg-slate-950 group-hover:border-slate-500"
+                      }`}>
+                        {!exclusiveFullScreen && <div className="w-2.5 h-2.5 rounded-full bg-rose-500" />}
+                      </div>
+                      <span className={`text-xs font-semibold ${!exclusiveFullScreen ? "text-slate-200" : "text-slate-400 group-hover:text-slate-300"}`}>
+                        Windowed full-screen mode
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Hardware Acceleration Section */}
+                <div className="space-y-3 pt-4 border-t border-slate-800/80">
+                  <div className="border-b border-slate-800/60 pb-1.5 mb-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Hardware Acceleration</span>
+                  </div>
+                  <div className="space-y-2">
+                    <div 
+                      onClick={() => setHardwareAcceleration("opengl")}
+                      className="flex items-center gap-3 cursor-pointer select-none py-1 group"
+                    >
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${
+                        hardwareAcceleration === "opengl" ? "border-rose-500 bg-slate-950" : "border-slate-700 bg-slate-950 group-hover:border-slate-500"
+                      }`}>
+                        {hardwareAcceleration === "opengl" && <div className="w-2.5 h-2.5 rounded-full bg-rose-500" />}
+                      </div>
+                      <span className={`text-xs font-semibold ${hardwareAcceleration === "opengl" ? "text-slate-200" : "text-slate-400 group-hover:text-slate-300"}`}>
+                        OpenGL (experimental)
+                      </span>
+                    </div>
+                    
+                    <div 
+                      onClick={() => setHardwareAcceleration("direct3d")}
+                      className="flex items-center gap-3 cursor-pointer select-none py-1 group"
+                    >
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${
+                        hardwareAcceleration === "direct3d" ? "border-rose-500 bg-slate-950" : "border-slate-700 bg-slate-950 group-hover:border-slate-500"
+                      }`}>
+                        {hardwareAcceleration === "direct3d" && <div className="w-2.5 h-2.5 rounded-full bg-rose-500" />}
+                      </div>
+                      <span className={`text-xs font-semibold ${hardwareAcceleration === "direct3d" ? "text-slate-200" : "text-slate-400 group-hover:text-slate-300"}`}>
+                        Direct3D (recommended)
+                      </span>
+                    </div>
+                    
+                    <div 
+                      onClick={() => setHardwareAcceleration("directdraw")}
+                      className="flex items-center gap-3 cursor-pointer select-none py-1 group"
+                    >
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${
+                        hardwareAcceleration === "directdraw" ? "border-rose-500 bg-slate-950" : "border-slate-700 bg-slate-950 group-hover:border-slate-500"
+                      }`}>
+                        {hardwareAcceleration === "directdraw" && <div className="w-2.5 h-2.5 rounded-full bg-rose-500" />}
+                      </div>
+                      <span className={`text-xs font-semibold ${hardwareAcceleration === "directdraw" ? "text-slate-200" : "text-slate-400 group-hover:text-slate-300"}`}>
+                        DirectDraw
+                      </span>
+                    </div>
+                    
+                    <div 
+                      onClick={() => setHardwareAcceleration("disable")}
+                      className="flex items-center gap-3 cursor-pointer select-none py-1 group"
+                    >
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${
+                        hardwareAcceleration === "disable" ? "border-rose-500 bg-slate-950" : "border-slate-700 bg-slate-950 group-hover:border-slate-500"
+                      }`}>
+                        {hardwareAcceleration === "disable" && <div className="w-2.5 h-2.5 rounded-full bg-rose-500" />}
+                      </div>
+                      <span className={`text-xs font-semibold ${hardwareAcceleration === "disable" ? "text-slate-200" : "text-slate-400 group-hover:text-slate-300"}`}>
+                        Disable
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 pt-2 border-t border-slate-950/40">
+                    <div 
+                      onClick={() => setUse16BitRenderer(!use16BitRenderer)}
+                      className="flex items-center gap-3 cursor-pointer select-none py-1 group"
+                    >
+                      <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
+                        use16BitRenderer ? "border-rose-500 bg-rose-500/10" : "border-slate-700 bg-slate-950 group-hover:border-slate-500"
+                      }`}>
+                        {use16BitRenderer && (
+                          <svg className="w-3 h-3 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
+                      <span className={`text-xs font-semibold ${use16BitRenderer ? "text-slate-200" : "text-slate-400 group-hover:text-slate-300"}`}>
+                        Use 16 bit renderer (decreases image quality)
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
