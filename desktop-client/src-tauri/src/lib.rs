@@ -338,6 +338,77 @@ fn set_discovery_enabled(enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Check whether AMPHUB is currently running with Administrator privileges.
+#[tauri::command]
+fn get_is_elevated() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::*;
+        use winreg::RegKey;
+        // Attempt to open a write-protected HKLM key — only succeeds as Admin
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        match hklm.create_subkey("SOFTWARE\\AMPHUB_ELEVATION_CHECK") {
+            Ok(_) => {
+                let _ = hklm.delete_subkey("SOFTWARE\\AMPHUB_ELEVATION_CHECK");
+                true
+            }
+            Err(_) => false,
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    false
+}
+
+/// Read the Windows UAC Secure Desktop policy.
+/// When true (default), UAC prompts run on the secure desktop — isolated from SendInput.
+/// When false, UAC prompts run on the regular desktop — AMPHUB's input simulation can reach them.
+#[tauri::command]
+fn get_uac_secure_desktop() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::*;
+        use winreg::RegKey;
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        if let Ok(key) = hklm.open_subkey(
+            "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System"
+        ) {
+            let val: Result<u32, _> = key.get_value("PromptOnSecureDesktop");
+            return val.unwrap_or(1) == 1;
+        }
+        true
+    }
+    #[cfg(not(target_os = "windows"))]
+    true
+}
+
+/// Toggle the Windows UAC Secure Desktop.
+/// Requires AMPHUB to be running as Administrator.
+/// Setting enabled=false makes UAC dialogs appear on the normal desktop
+/// so that AMPHUB's input simulation (SendInput via enigo) can click Yes/No on them.
+#[tauri::command]
+fn set_uac_secure_desktop(enabled: bool) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::*;
+        use winreg::RegKey;
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        let (key, _) = hklm
+            .create_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System")
+            .map_err(|e| format!("Registry access denied — ensure AMPHUB runs as Administrator: {}", e))?;
+        let val: u32 = if enabled { 1 } else { 0 };
+        key.set_value("PromptOnSecureDesktop", &val)
+            .map_err(|e| format!("Failed to write registry value: {}", e))?;
+        println!(
+            "[UAC] PromptOnSecureDesktop = {} ({})",
+            val,
+            if enabled { "Secure Desktop ON (default)" } else { "Normal Desktop — input simulation can reach UAC" }
+        );
+        return Ok(());
+    }
+    #[cfg(not(target_os = "windows"))]
+    Ok(())
+}
+
 #[tauri::command]
 fn show_app_window(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
@@ -347,6 +418,7 @@ fn show_app_window(app: tauri::AppHandle) -> Result<(), String> {
     }
     Ok(())
 }
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -379,6 +451,9 @@ pub fn run() {
             set_default_permission,
             get_discovery_enabled,
             set_discovery_enabled,
+            get_is_elevated,
+            get_uac_secure_desktop,
+            set_uac_secure_desktop,
         ])
         .setup(|app| {
             // Setup tray menu

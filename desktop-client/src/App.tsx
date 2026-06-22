@@ -60,6 +60,8 @@ function App() {
   const [unattendedAccess, setUnattendedAccess] = useState(false);
   const [defaultPermission, setDefaultPermission] = useState<"ask" | "allow" | "deny">("ask");
   const [discoveryEnabled, setDiscoveryEnabled] = useState(true);
+  const [isElevated, setIsElevated] = useState(false);
+  const [uacSecureDesktop, setUacSecureDesktop] = useState(true);
   const [recentConnections, setRecentConnections] = useState<string[]>([]);
   const [logs, setLogs] = useState<string[]>([
     "AMPHUB Core Client initialized.",
@@ -266,6 +268,15 @@ function App() {
         .catch(() => {});
       safeInvoke<boolean>("get_discovery_enabled")
         .then((v) => setDiscoveryEnabled(v))
+        .catch(() => {});
+      safeInvoke<boolean>("get_is_elevated")
+        .then((v) => {
+          setIsElevated(v);
+          addLog(`Admin elevation: ${v ? "Running as Administrator ✓" : "NOT elevated — UAC dialogs may not respond"}`);
+        })
+        .catch(() => {});
+      safeInvoke<boolean>("get_uac_secure_desktop")
+        .then((v) => setUacSecureDesktop(v))
         .catch(() => {});
     }
   }, []);
