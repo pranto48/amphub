@@ -178,12 +178,12 @@ function App() {
 
   const initiateWebRTCOffer = async () => {
     addLog(`[WebRTC] Initiating P2P stream connection to host: ${targetId}`);
-    closePeerConnection();
+    closeAllPeerConnections();
     
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
     });
-    peerConnectionRef.current = pc;
+    peerConnectionsRef.current.set(targetId, pc);
 
     pc.onicecandidate = (e) => {
       if (e.candidate) {
@@ -371,7 +371,7 @@ function App() {
         .then(() => addLog("Desktop streamer capture loop stopped."))
         .catch(err => addLog(`Failed to stop streamer loop: ${err}`));
 
-      closePeerConnection();
+      closeAllPeerConnections();
     }
   }, [connectionStatus, sessionRole]);
 
@@ -423,21 +423,25 @@ function App() {
                 token: data.token,
                 requestId: data.requestId
               });
+              safeInvoke("show_app_window").catch((err) => {
+                console.error("Failed to restore app window on access request:", err);
+              });
             } else if (data.type === "offer") {
               addLog(`[WebRTC] Received SDP Offer from controller: ${data.sender}`);
-              closePeerConnection();
+              const senderId = data.sender;
+              closePeerConnection(senderId);
               
               const pc = new RTCPeerConnection({
                 iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
               });
-              peerConnectionRef.current = pc;
+              peerConnectionsRef.current.set(senderId, pc);
 
               pc.onicecandidate = (e) => {
                 if (e.candidate) {
                   safeInvoke("send_signaling_message", {
                     message: JSON.stringify({
                       type: "ice-candidate",
-                      target: data.sender,
+                      target: senderId,
                       sender: myId,
                       candidate: e.candidate
                     })
@@ -447,7 +451,6 @@ function App() {
 
               try {
                 const stream = await getLocalStream();
-                localStreamRef.current = stream;
                 stream.getTracks().forEach(track => pc.addTrack(track, stream));
                 addLog("[WebRTC] Local screen stream tracks added using .addTrack()");
               } catch (streamErr) {
@@ -461,24 +464,31 @@ function App() {
               safeInvoke("send_signaling_message", {
                 message: JSON.stringify({
                   type: "answer",
-                  target: data.sender,
+                  target: senderId,
                   sender: myId,
                   answer: answer
                 })
               });
-              addLog(`[WebRTC] Sent SDP Answer to controller: ${data.sender}`);
+              addLog(`[WebRTC] Sent SDP Answer to controller: ${senderId}`);
             } else if (data.type === "answer") {
               addLog(`[WebRTC] Received SDP Answer from host: ${data.sender}`);
-              if (peerConnectionRef.current) {
-                await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+              const pc = peerConnectionsRef.current.get(data.sender);
+              if (pc) {
+                await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
               }
             } else if (data.type === "ice-candidate") {
-              if (peerConnectionRef.current) {
-                await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+              const pc = peerConnectionsRef.current.get(data.sender);
+              if (pc) {
+                await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
               }
             } else if (["mouseMove", "mouseClick", "keyPress", "keyType"].includes(data.type)) {
               if (sessionRole === "host") {
-                safeInvoke("simulate_input", { action: data }).catch(err => {
+                const action = { ...data };
+                if (action.type === "mouseMove") {
+                  action.x = Math.round(data.x * window.screen.width);
+                  action.y = Math.round(data.y * window.screen.height);
+                }
+                safeInvoke("simulate_input", { action }).catch(err => {
                   console.error("Failed to simulate remote input:", err);
                 });
               }
@@ -506,7 +516,7 @@ function App() {
       if (unlistenMessage) unlistenMessage();
       if (unlistenStream) unlistenStream();
       clearPolling();
-      closePeerConnection();
+      closeAllPeerConnections();
     };
   }, []);
 
