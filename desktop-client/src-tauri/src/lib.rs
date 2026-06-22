@@ -170,6 +170,54 @@ fn set_clipboard(text: String) -> Result<(), String> {
     clipboard.set_text(text).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn get_autostart_status() -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::*;
+        use winreg::RegKey;
+        
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let run_key = hkcu.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run")
+            .map_err(|e| e.to_string())?;
+        
+        let val: Result<String, _> = run_key.get_value("AMPHUB");
+        return Ok(val.is_ok());
+    }
+    
+    #[cfg(not(target_os = "windows"))]
+    Ok(false)
+}
+
+#[tauri::command]
+fn set_autostart_status(enabled: bool) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::*;
+        use winreg::RegKey;
+        
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let (run_key, _) = hkcu.create_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run")
+            .map_err(|e| e.to_string())?;
+        
+        if enabled {
+            let exe_path = std::env::current_exe()
+                .map_err(|e| format!("Failed to get current executable path: {}", e))?;
+            let exe_str = exe_path.to_string_lossy().to_string();
+            run_key.set_value("AMPHUB", &exe_str)
+                .map_err(|e| e.to_string())?;
+            println!("[AUTOSTART] Enabled startup path: {}", exe_str);
+        } else {
+            let _ = run_key.delete_value("AMPHUB");
+            println!("[AUTOSTART] Disabled startup key.");
+        }
+        return Ok(());
+    }
+    
+    #[cfg(not(target_os = "windows"))]
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -191,6 +239,8 @@ pub fn run() {
             ping_signaling_server,
             start_desktop_stream,
             stop_desktop_stream,
+            get_autostart_status,
+            set_autostart_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

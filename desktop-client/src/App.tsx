@@ -55,6 +55,7 @@ function App() {
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const [isSignalingServerReachable, setIsSignalingServerReachable] = useState<boolean | null>(null);
+  const [autostartEnabled, setAutostartEnabled] = useState(false);
   const [logs, setLogs] = useState<string[]>([
     "AMPHUB Core Client initialized.",
     `Mode: ${isTauri ? "AMPHUB Windows Client" : "Standard Browser Environment (Simulation Enabled)"}`
@@ -89,19 +90,27 @@ function App() {
   };
 
   const getLocalStream = async (): Promise<MediaStream> => {
-    // If running inside Tauri native shell, always bypass navigator sharing dialog
-    // and use programmatic direct screen capture loop to enforce entire screen sharing.
-    if (isTauri) {
-      addLog("[WebRTC] Initializing native programmatic canvas capture loop to share entire screen.");
-    } else {
-      try {
-        if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
-          return await navigator.mediaDevices.getDisplayMedia({ video: true });
-        }
-      } catch (e) {
-        console.warn("getDisplayMedia failed, falling back to canvas-based stream capture", e);
+    // First, try native Chromium getDisplayMedia which is auto-approved via additionalBrowserArgs
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+        addLog("[WebRTC] Requesting native display media stream...");
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            displaySurface: "monitor",
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            frameRate: { ideal: 30 }
+          },
+          audio: false
+        });
+        addLog("[WebRTC] Successfully acquired native display media stream.");
+        return stream;
       }
+    } catch (e) {
+      addLog(`[WebRTC] getDisplayMedia failed, falling back to canvas capture loop: ${e}`);
     }
+
+    addLog("[WebRTC] Initializing fallback programmatic canvas capture loop to share screen.");
     
     const canvas = document.createElement("canvas");
     canvas.width = 1920;
@@ -211,6 +220,36 @@ function App() {
         addLog(`Failed to resolve Hardware GUID: ${err}`);
       });
   }, []);
+
+  // Initialize autostart status
+  useEffect(() => {
+    if (isTauri) {
+      safeInvoke<boolean>("get_autostart_status")
+        .then((status) => {
+          setAutostartEnabled(status);
+          addLog(`Windows startup registry queried: ${status ? "Enabled" : "Disabled"}`);
+        })
+        .catch((err) => {
+          addLog(`Failed to query startup registry: ${err}`);
+        });
+    }
+  }, []);
+
+  const toggleAutostart = async () => {
+    const nextVal = !autostartEnabled;
+    if (!isTauri) {
+      setAutostartEnabled(nextVal);
+      addLog(`[Mock] Toggled startup setting to: ${nextVal ? "Enabled" : "Disabled"}`);
+      return;
+    }
+    try {
+      await safeInvoke("set_autostart_status", { enabled: nextVal });
+      setAutostartEnabled(nextVal);
+      addLog(`${nextVal ? "Enabled" : "Disabled"} Startup on Windows boot.`);
+    } catch (err: any) {
+      addLog(`Failed to update startup setting: ${err}`);
+    }
+  };
 
   // Auto-establish standby signaling connection on startup when not in mock mode
   useEffect(() => {
@@ -1322,6 +1361,25 @@ function App() {
                       {isSignalingServerReachable === true ? "Reachable" :
                        isSignalingServerReachable === false ? "Unreachable" : "Checking..."}
                     </span>
+                  </div>
+
+                  {/* Autostart Startup Toggle */}
+                  <div className="flex justify-between items-center text-xs pt-3.5 border-t border-slate-800/40">
+                    <div>
+                      <span className="text-slate-400 font-semibold block">Start on Windows Boot</span>
+                      <span className="text-[10px] text-slate-500">Automatically launch AMPHUB when your computer starts</span>
+                    </div>
+                    <button
+                      onClick={toggleAutostart}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none cursor-pointer ${
+                        autostartEnabled ? "bg-rose-600" : "bg-slate-800"
+                      }`}
+                    >
+                      <span
+                        className="inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform"
+                        style={{ transform: autostartEnabled ? 'translateX(16px)' : 'translateX(4px)' }}
+                      />
+                    </button>
                   </div>
                 </div>
               </div>
