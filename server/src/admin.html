@@ -609,6 +609,37 @@
         </div>
       </section>
 
+      <!-- Connected Windows AMPHUB Clients -->
+      <section class="card" style="margin-top: 16px;">
+        <div class="card-title">
+          <span>Connected Windows AMPHUB Clients</span>
+          <span class="card-badge" id="clients-count">0</span>
+        </div>
+        <div class="table-container">
+          <table id="clients-table">
+            <thead>
+              <tr>
+                <th>Client ID</th>
+                <th>IP Address</th>
+                <th>Connection Type</th>
+                <th>Connected Time</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="clients-body">
+              <tr>
+                <td colspan="5" class="empty-state">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+                  </svg>
+                  <div>No connected client nodes.</div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <!-- Automated Deployment Dashboard -->
       <section class="card" style="margin-top: 16px;">
         <div class="card-title">
@@ -769,12 +800,15 @@
     // State management
     let pendingRequests = [];
     let activeSessions = [];
+    let connectedClients = [];
 
     // Elements
     const pendingBody = document.getElementById('pending-body');
     const activeBody = document.getElementById('active-body');
     const pendingCount = document.getElementById('pending-count');
     const activeCount = document.getElementById('active-count');
+    const clientsBody = document.getElementById('clients-body');
+    const clientsCount = document.getElementById('clients-count');
     const feedContainer = document.getElementById('feed-container');
     const tokenInput = document.getElementById('token');
     const statusDot = document.getElementById('status-dot');
@@ -863,6 +897,9 @@
         activeSessions = activeData;
         renderActive();
       }
+
+      // Fetch Connected Clients
+      fetchClients();
 
       // Fetch Deploy Status
       fetchDeployStatus();
@@ -1075,6 +1112,47 @@
       }).join('');
     }
 
+    async function fetchClients() {
+      const clientsData = await apiCall('GET', '/api/v1/admin/clients');
+      if (clientsData) {
+        connectedClients = clientsData;
+        renderClients();
+      }
+    }
+
+    function renderClients() {
+      clientsCount.textContent = connectedClients.length;
+      if (connectedClients.length === 0) {
+        clientsBody.innerHTML = `
+          <tr>
+            <td colspan="5" class="empty-state">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+              </svg>
+              <div>No connected client nodes.</div>
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      clientsBody.innerHTML = connectedClients.map(c => {
+        let connType = 'Standby Host';
+        if (c.isController) connType = 'Active Controller';
+        else if (c.isHost && !c.isStandby) connType = 'Active Host';
+
+        return `
+          <tr>
+            <td class="text-mono font-medium">${c.clientId}</td>
+            <td class="text-mono">${c.ip}</td>
+            <td>${connType}</td>
+            <td>${formatTime(c.connectedAt)}</td>
+            <td><span class="badge-status badge-approved">Online</span></td>
+          </tr>
+        `;
+      }).join('');
+    }
+
     // WebSocket state synchronization
     let ws = null;
     function initWebSocket() {
@@ -1108,6 +1186,11 @@
               addFeedEvent('Session State Updated', `Session request status changed to ${data.row.status}.`, 'INFO');
             }
             fetchData();
+          }
+
+          // Handle connected clients table update events
+          if (data.table === 'ConnectedClients') {
+            fetchClients();
           }
 
           // Handle WAN connection request alerts (PENDING_ADMIN gate fired)
