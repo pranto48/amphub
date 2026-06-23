@@ -595,7 +595,7 @@ function AdminPanel() {
       return;
     }
 
-    notify("success", "Request updated", `${status.toUpperCase()} saved for ${r.node_name ?? r.node_id.slice(0, 8)}.`);
+    notify("success", "Request updated", `${status.toUpperCase()} saved for ${r.node_name ?? r.node_id?.slice(0, 8) ?? ""}.`);
     await load();
   }
 
@@ -617,7 +617,7 @@ function AdminPanel() {
         });
         if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
         
-        notify("warning", "Session terminated", `Session ${sessionItem.id.slice(0, 8)} was terminated.`);
+        notify("warning", "Session terminated", `Session ${sessionItem.id?.slice(0, 8) ?? ""} was terminated.`);
         await load();
       } catch (err: any) {
         notify("error", "Terminate failed", err.message);
@@ -644,7 +644,7 @@ function AdminPanel() {
       return;
     }
 
-    notify("warning", "Session terminated", `Session ${sessionItem.id.slice(0, 8)} was terminated.`);
+    notify("warning", "Session terminated", `Session ${sessionItem.id?.slice(0, 8) ?? ""} was terminated.`);
     await load();
   }
 
@@ -1181,9 +1181,9 @@ function AdminPanel() {
               return (
                 <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
                   <div className="min-w-0 space-y-1">
-                    <div className="text-sm font-medium">{r.node_name ?? nodeMap[r.node_id] ?? r.node_id.slice(0, 8)}</div>
+                    <div className="text-sm font-medium">{r.node_name ?? nodeMap[r.node_id] ?? r.node_id?.slice(0, 8) ?? ""}</div>
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                      <span className="inline-flex items-center gap-1"><UserCircle2 className="size-3.5" />{requester?.email ?? r.requester_identity ?? r.requester_id.slice(0, 8)}</span>
+                      <span className="inline-flex items-center gap-1"><UserCircle2 className="size-3.5" />{requester?.email ?? r.requester_identity ?? r.requester_id?.slice(0, 8) ?? ""}</span>
                       <span className="inline-flex items-center gap-1"><Globe className="size-3.5" />{r.location_hint ?? "IP/geo unavailable"}</span>
                     </div>
                   </div>
@@ -1219,8 +1219,8 @@ function AdminPanel() {
               return (
                 <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
                   <div className="min-w-0">
-                    <div className="text-sm font-medium">{r.node_name ?? nodeMap[r.node_id] ?? r.node_id.slice(0, 8)}</div>
-                    <div className="text-xs text-muted-foreground">Requester: {requesterMap[r.requester_id]?.email ?? r.requester_identity ?? r.requester_id.slice(0, 8)}</div>
+                    <div className="text-sm font-medium">{r.node_name ?? nodeMap[r.node_id] ?? r.node_id?.slice(0, 8) ?? ""}</div>
+                    <div className="text-xs text-muted-foreground">Requester: {requesterMap[r.requester_id]?.email ?? r.requester_identity ?? r.requester_id?.slice(0, 8) ?? ""}</div>
                   </div>
                   <Button size="sm" variant="destructive" disabled={deciding} onClick={() => void decide(r, "revoked")} aria-label={`Revoke request ${r.id}`}>
                     {deciding ? <Loader2 className="size-4 animate-spin" /> : <Ban className="size-4" />} Revoke
@@ -1247,8 +1247,8 @@ function AdminPanel() {
               return (
                 <div key={s.id} className="flex items-center justify-between gap-3 py-3">
                   <div className="min-w-0 text-xs">
-                    <div className="text-sm font-medium">{nodeMap[s.node_id] ?? s.node_id.slice(0, 8)}</div>
-                    <div className="font-mono text-muted-foreground">session · {s.id.slice(0, 8)} · requester {requesterMap[s.requester_id ?? ""]?.email ?? s.requester_id?.slice(0, 8) ?? "—"}</div>
+                    <div className="text-sm font-medium">{nodeMap[s.node_id] ?? s.node_id?.slice(0, 8) ?? ""}</div>
+                    <div className="font-mono text-muted-foreground">session · {s.id?.slice(0, 8) ?? ""} · requester {requesterMap[s.requester_id ?? ""]?.email ?? s.requester_id?.slice(0, 8) ?? "—"}</div>
                   </div>
                   <Button size="sm" variant="destructive" disabled={terminating} onClick={() => void terminateSession(s)} aria-label={`Terminate session ${s.id}`}>
                     {terminating ? <Loader2 className="size-4 animate-spin" /> : <Ban className="size-4" />} Terminate
