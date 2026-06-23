@@ -28,12 +28,22 @@ async function safeInvoke<T>(cmd: string, args?: Record<string, any>): Promise<T
     if (cmd === "capture_screen") {
       return "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" as unknown as T;
     }
+    if (cmd === "get_local_info") {
+      return { hostname: "Demo-PC-Admin", local_ip: "192.168.1.15" } as unknown as T;
+    }
     if (cmd === "get_clipboard") {
       return "Mock Clip content from browser" as unknown as T;
     }
     return Promise.resolve() as unknown as T;
   }
 }
+
+export type SavedSession = {
+  id: string;
+  name: string;
+  ip: string;
+  pinned: boolean;
+};
 
 function App() {
   const [activeTab, setActiveTab] = useState<"remote" | "settings" | "logs">("remote");
@@ -95,7 +105,9 @@ function App() {
   const [use16BitRenderer, setUse16BitRenderer] = useState(() => {
     return localStorage.getItem("amphub_use_16bit_renderer") === "true";
   });
-  const [recentConnections, setRecentConnections] = useState<string[]>([]);
+  const [localPcName, setLocalPcName] = useState("Host-PC");
+  const [localIpAddr, setLocalIpAddr] = useState("127.0.0.1");
+  const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
   const [showMovementCursor, setShowMovementCursor] = useState(true);
   const cursorMovementTimeoutRef = useRef<any>(null);
   const [logs, setLogs] = useState<string[]>([
@@ -314,15 +326,25 @@ function App() {
         .then((v) => setUacSecureDesktop(v))
         .catch(() => {});
     }
+    // Get local machine hostname and IP
+    safeInvoke<{ hostname: string; local_ip: string }>("get_local_info")
+      .then((info) => {
+        setLocalPcName(info.hostname);
+        setLocalIpAddr(info.local_ip);
+        addLog(`Resolved client host: ${info.hostname} (${info.local_ip})`);
+      })
+      .catch((err) => {
+        addLog(`Failed to resolve local info: ${err}`);
+      });
   }, []);
 
-  // Load recent connections on startup
+  // Load saved sessions on startup
   useEffect(() => {
     try {
-      const list = JSON.parse(localStorage.getItem("amphub_recent_connections") || "[]");
-      setRecentConnections(list);
+      const list = JSON.parse(localStorage.getItem("amphub_saved_sessions") || "[]");
+      setSavedSessions(list);
     } catch (e) {
-      setRecentConnections([]);
+      setSavedSessions([]);
     }
   }, []);
 
@@ -363,23 +385,78 @@ function App() {
     const cleanId = id.trim().toUpperCase();
     if (!cleanId) return;
     try {
-      const list = JSON.parse(localStorage.getItem("amphub_recent_connections") || "[]");
-      const updated = [cleanId, ...list.filter((x: string) => x !== cleanId)].slice(0, 6);
-      localStorage.setItem("amphub_recent_connections", JSON.stringify(updated));
-      setRecentConnections(updated);
+      const list = JSON.parse(localStorage.getItem("amphub_saved_sessions") || "[]") as SavedSession[];
+      const exists = list.find((x) => x.id === cleanId);
+      let updated: SavedSession[];
+      if (exists) {
+        // Move to top
+        updated = [exists, ...list.filter((x) => x.id !== cleanId)];
+      } else {
+        const newItem: SavedSession = {
+          id: cleanId,
+          name: `Remote-PC-${cleanId.slice(0, 3)}`,
+          ip: hostIp || "192.168.9.9",
+          pinned: false
+        };
+        updated = [newItem, ...list];
+      }
+      localStorage.setItem("amphub_saved_sessions", JSON.stringify(updated));
+      setSavedSessions(updated);
     } catch (e) {
       console.error("Failed to save recent connection:", e);
     }
   };
 
-  const removeRecentConnection = (id: string) => {
+  const removeSavedSession = (id: string) => {
     try {
-      const list = JSON.parse(localStorage.getItem("amphub_recent_connections") || "[]");
-      const updated = list.filter((x: string) => x !== id);
-      localStorage.setItem("amphub_recent_connections", JSON.stringify(updated));
-      setRecentConnections(updated);
+      const list = JSON.parse(localStorage.getItem("amphub_saved_sessions") || "[]") as SavedSession[];
+      const updated = list.filter((x) => x.id !== id);
+      localStorage.setItem("amphub_saved_sessions", JSON.stringify(updated));
+      setSavedSessions(updated);
     } catch (e) {
-      console.error("Failed to remove recent connection:", e);
+      console.error("Failed to remove saved session:", e);
+    }
+  };
+
+  const togglePinSession = (id: string) => {
+    try {
+      const list = JSON.parse(localStorage.getItem("amphub_saved_sessions") || "[]") as SavedSession[];
+      const updated = list.map((x) => x.id === id ? { ...x, pinned: !x.pinned } : x);
+      localStorage.setItem("amphub_saved_sessions", JSON.stringify(updated));
+      setSavedSessions(updated);
+    } catch (e) {
+      console.error("Failed to toggle pin:", e);
+    }
+  };
+
+  const updateSavedSession = (id: string, name: string, ip: string) => {
+    try {
+      const list = JSON.parse(localStorage.getItem("amphub_saved_sessions") || "[]") as SavedSession[];
+      const updated = list.map((x) => x.id === id ? { ...x, name, ip } : x);
+      localStorage.setItem("amphub_saved_sessions", JSON.stringify(updated));
+      setSavedSessions(updated);
+    } catch (e) {
+      console.error("Failed to update saved session:", e);
+    }
+  };
+
+  const addSavedSession = (id: string, name: string, ip: string) => {
+    const cleanId = id.trim().toUpperCase();
+    if (!cleanId) return;
+    try {
+      const list = JSON.parse(localStorage.getItem("amphub_saved_sessions") || "[]") as SavedSession[];
+      if (list.some((x) => x.id === cleanId)) return;
+      const newItem: SavedSession = {
+        id: cleanId,
+        name: name || `Remote-PC-${cleanId.slice(0, 3)}`,
+        ip: ip || "192.168.9.9",
+        pinned: false
+      };
+      const updated = [newItem, ...list];
+      localStorage.setItem("amphub_saved_sessions", JSON.stringify(updated));
+      setSavedSessions(updated);
+    } catch (e) {
+      console.error("Failed to add saved session:", e);
     }
   };
 

@@ -409,6 +409,38 @@ fn set_uac_secure_desktop(enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(serde::Serialize)]
+struct LocalInfo {
+    hostname: String,
+    local_ip: String,
+}
+
+#[tauri::command]
+fn get_local_info() -> Result<LocalInfo, String> {
+    let hostname = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "Host-PC".to_string());
+
+    let local_ip = match std::net::UdpSocket::bind("0.0.0.0:0") {
+        Ok(socket) => {
+            if socket.connect("8.8.8.8:80").is_ok() {
+                match socket.local_addr() {
+                    Ok(addr) => addr.ip().to_string(),
+                    Err(_) => "127.0.0.1".to_string(),
+                }
+            } else {
+                "127.0.0.1".to_string()
+            }
+        }
+        Err(_) => "127.0.0.1".to_string(),
+    };
+
+    Ok(LocalInfo {
+        hostname,
+        local_ip,
+    })
+}
+
 #[tauri::command]
 fn show_app_window(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
@@ -430,6 +462,7 @@ pub fn run() {
             greet,
             get_connection_id,
             get_hardware_guid,
+            get_local_info,
             simulate_input,
             capture_screen,
             get_clipboard,
