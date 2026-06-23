@@ -46,6 +46,7 @@ services:
       args:
         - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
         - VITE_SUPABASE_PUBLISHABLE_KEY=${VITE_SUPABASE_PUBLISHABLE_KEY}
+        - VITE_GIT_COMMIT_COUNT=${VITE_GIT_COMMIT_COUNT}
     restart: unless-stopped
     depends_on:
       api:

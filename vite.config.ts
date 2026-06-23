@@ -7,11 +7,14 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import { execSync } from "child_process";
 
-let commitCount = "201";
-try {
-  commitCount = execSync("git rev-list --count HEAD").toString().trim();
-} catch (e) {
-  console.error("Failed to get git commit count", e);
+let commitCount = process.env.VITE_GIT_COMMIT_COUNT || "";
+if (!commitCount) {
+  try {
+    commitCount = execSync("git rev-list --count HEAD").toString().trim();
+  } catch (e) {
+    console.error("Failed to get git commit count", e);
+    commitCount = "201";
+  }
 }
 const version = `V2.${(parseInt(commitCount) - 200).toString().padStart(2, '0')}`;
 

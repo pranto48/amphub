@@ -11,7 +11,7 @@ const DEPLOY_CMD = [
   `echo "${ROOT_PASS}" | sudo -S mkdir -p /home/it/amphub/update-shared /home/it/amphub/data`,
   `echo "${ROOT_PASS}" | sudo -S chown -R 10001:10001 /home/it/amphub/update-shared /home/it/amphub/data`,
   `echo "${ROOT_PASS}" | sudo -S chmod -R 770 /home/it/amphub/update-shared /home/it/amphub/data`,
-  `echo "${ROOT_PASS}" | sudo -S docker compose up --build -d`
+  `echo "${ROOT_PASS}" | sudo -S env VITE_GIT_COMMIT_COUNT=\$(git rev-list --count HEAD) docker compose up --build -d`
 ].join(" && ");
 
 function deployToServer() {
