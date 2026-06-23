@@ -83,7 +83,7 @@ function AboutPage() {
                   </div>
                 </div>
                 <Button asChild size="sm" variant="secondary" className="hover:scale-105 transition-transform" id="btn-download-exe">
-                  <a href={`/downloads/AMPHUB_${version}_x64-setup.exe`} download>
+                  <a href="/downloads/AMPHUB_latest_x64-setup.exe" download={`AMPHUB_${version}_x64-setup.exe`}>
                     <Download className="size-3.5 mr-1" />
                     Download
                   </a>
@@ -99,7 +99,7 @@ function AboutPage() {
                   </div>
                 </div>
                 <Button asChild size="sm" variant="outline" className="hover:scale-105 transition-transform" id="btn-download-msi">
-                  <a href={`/downloads/AMPHUB_${version}_x64_en-US.msi`} download>
+                  <a href="/downloads/AMPHUB_latest_x64_en-US.msi" download={`AMPHUB_${version}_x64_en-US.msi`}>
                     <Download className="size-3.5 mr-1" />
                     Download
                   </a>
