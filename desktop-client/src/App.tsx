@@ -137,6 +137,20 @@ function App() {
   const unattendedAccessRef = useRef(false);
   const defaultPermissionRef = useRef<"ask" | "allow" | "deny">("ask");
 
+  const myIdRef = useRef("Loading...");
+  const targetIdRef = useRef("");
+  const localPcNameRef = useRef("Host-PC");
+  const localIpAddrRef = useRef("127.0.0.1");
+  const sessionRoleRef = useRef<"host" | "controller" | null>(null);
+  const hostIpRef = useRef("192.168.9.9");
+
+  useEffect(() => { myIdRef.current = myId; }, [myId]);
+  useEffect(() => { targetIdRef.current = targetId; }, [targetId]);
+  useEffect(() => { localPcNameRef.current = localPcName; }, [localPcName]);
+  useEffect(() => { localIpAddrRef.current = localIpAddr; }, [localIpAddr]);
+  useEffect(() => { sessionRoleRef.current = sessionRole; }, [sessionRole]);
+  useEffect(() => { hostIpRef.current = hostIp; }, [hostIp]);
+
   const clearPolling = () => {
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
@@ -392,7 +406,7 @@ function App() {
   }, [use16BitRenderer]);
 
 
-  const saveRecentConnection = (id: string) => {
+  const saveRecentConnection = (id: string, name?: string, ip?: string) => {
     const cleanId = id.trim().toUpperCase();
     if (!cleanId) return;
     try {
@@ -400,13 +414,18 @@ function App() {
       const exists = list.find((x) => x.id === cleanId);
       let updated: SavedSession[];
       if (exists) {
-        // Move to top
-        updated = [exists, ...list.filter((x) => x.id !== cleanId)];
+        // Update its name and IP if provided, and move to top
+        const updatedItem = {
+          ...exists,
+          name: name || exists.name,
+          ip: ip || exists.ip
+        };
+        updated = [updatedItem, ...list.filter((x) => x.id !== cleanId)];
       } else {
         const newItem: SavedSession = {
           id: cleanId,
-          name: `Remote-PC-${cleanId.slice(0, 3)}`,
-          ip: hostIp || "192.168.9.9",
+          name: name || `Remote-PC-${cleanId.slice(0, 3)}`,
+          ip: ip || hostIpRef.current || "192.168.9.9",
           pinned: false
         };
         updated = [newItem, ...list];
@@ -658,6 +677,19 @@ function App() {
               addLog(`[Role Assignment] Server assigned role: ${data.role.toUpperCase()}`);
             } else if (data.type === "peer_joined") {
               addLog(`[Session] Peer connected: ${data.peerId} (${data.role})`);
+              // If we are the host and a controller joins, send them our PC info
+              if (sessionRoleRef.current === "host" && data.role === "controller") {
+                addLog(`[HOST] Controller connected. Dispatching PC info: Name=${localPcNameRef.current}, IP=${localIpAddrRef.current}`);
+                safeInvoke("send_signaling_message", {
+                  message: JSON.stringify({
+                    type: "host_info",
+                    target: data.peerId,
+                    sender: myIdRef.current,
+                    hostname: localPcNameRef.current,
+                    ip: localIpAddrRef.current
+                  })
+                }).catch(err => addLog(`Failed to send host PC info to controller: ${err}`));
+              }
               // Check current sessionRole state or read it from closure
               // (Note: inside this listener, sessionRole might be stale, so we can check data.role === "host")
               if (data.role === "host") {
@@ -784,6 +816,9 @@ function App() {
               if (pc) {
                 await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
               }
+            } else if (data.type === "host_info") {
+              addLog(`[Host Info] Received host PC name: ${data.hostname}, IP: ${data.ip}`);
+              saveRecentConnection(data.sender, data.hostname, data.ip);
             } else if (data.type === "ice-candidate") {
               const pc = peerConnectionsRef.current.get(data.sender);
               if (pc) {

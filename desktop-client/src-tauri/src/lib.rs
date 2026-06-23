@@ -78,8 +78,12 @@ fn get_hardware_guid() -> String {
 #[tauri::command]
 fn get_connection_id() -> String {
     let guid = get_hardware_guid();
+    let hostname = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "Host-PC".to_string());
+    let salt = format!("{}-{}", guid, hostname);
     let mut hasher = Sha256::new();
-    hasher.update(guid.as_bytes());
+    hasher.update(salt.as_bytes());
     let result = hasher.finalize();
     let hex_str = format!("{:x}", result);
     // Format first 9 hex digits as "XXX-XXX-XXX"
