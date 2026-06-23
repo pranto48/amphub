@@ -69,44 +69,19 @@ async function main() {
     console.log('[DB-SEED] Seeded bootstrap admin user (admin@admin.com).');
   }
 
-  // Seed default desktop nodes if none exist
-  const count = await prisma.desktopNode.count();
-  if (count === 0) {
-    const nodes = [
-      {
-        id: '00000000-0000-0000-0000-000000000003',
-        name: 'Workstation-01',
-        remoteId: 'RM-7421-A19F',
-        localIp: '192.168.1.42',
-        os: 'windows',
-        status: 'online',
-        lastSeen: new Date(),
+  // Delete existing dummy desktop nodes if they exist
+  await prisma.desktopNode.deleteMany({
+    where: {
+      id: {
+        in: [
+          '00000000-0000-0000-0000-000000000003',
+          '00000000-0000-0000-0000-000000000004',
+          '00000000-0000-0000-0000-000000000005',
+        ],
       },
-      {
-        id: '00000000-0000-0000-0000-000000000004',
-        name: 'LinuxBox-Dev',
-        remoteId: 'RM-3308-C71B',
-        localIp: '192.168.1.55',
-        os: 'linux',
-        status: 'online',
-        lastSeen: new Date(),
-      },
-      {
-        id: '00000000-0000-0000-0000-000000000005',
-        name: 'FileServer',
-        remoteId: 'RM-9013-E22D',
-        localIp: '192.168.1.10',
-        os: 'linux',
-        status: 'offline',
-        lastSeen: new Date(Date.now() - 2 * 60 * 60 * 1000),
-      },
-    ];
-
-    for (const node of nodes) {
-      await prisma.desktopNode.create({ data: node });
-    }
-    console.log('[DB-SEED] Seeded default desktop nodes.');
-  }
+    },
+  });
+  console.log('[DB-SEED] Cleaned up default demo desktop nodes.');
 
   console.log('[DB-SEED] Seeding complete.');
 }

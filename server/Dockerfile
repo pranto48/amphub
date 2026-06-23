@@ -26,10 +26,10 @@ RUN apk add --no-cache openssl
 RUN addgroup -g 10001 -S amphubgroup && \
     adduser -u 10001 -S -G amphubgroup -h /home/amphub amphub
 
-# Create persistent data directory and grant write access only to it
-RUN mkdir -p /app/data && \
-    chown -R amphub:amphubgroup /app/data && \
-    chmod 700 /app/data
+# Create persistent directories and grant write access
+RUN mkdir -p /app/data /app/update-shared && \
+    chown -R amphub:amphubgroup /app/data /app/update-shared && \
+    chmod 770 /app/data /app/update-shared
 
 # Copy dependencies, git SHA, and prisma schema/seeding files
 COPY --from=builder /app/node_modules ./node_modules

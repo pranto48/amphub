@@ -10,6 +10,7 @@ export const Route = createFileRoute("/_authenticated/about")({
 });
 
 function AboutPage() {
+  const version = import.meta.env.VITE_APP_VERSION || "V2.01";
   return (
     <div className="space-y-8 max-w-5xl mx-auto">
       <div>
@@ -78,11 +79,11 @@ function AboutPage() {
                   <div className="size-8 rounded bg-primary/10 flex items-center justify-center text-primary text-xs font-semibold">EXE</div>
                   <div>
                     <div className="text-xs font-semibold">Standard NSIS Setup (Recommended)</div>
-                    <div className="text-[10px] text-muted-foreground">Version 0.1.0 · x64 · setup.exe</div>
+                    <div className="text-[10px] text-muted-foreground">Version {version} · x64 · setup.exe</div>
                   </div>
                 </div>
                 <Button asChild size="sm" variant="secondary" className="hover:scale-105 transition-transform" id="btn-download-exe">
-                  <a href="/downloads/AMPHUB_0.1.0_x64-setup.exe" download>
+                  <a href={`/downloads/AMPHUB_${version}_x64-setup.exe`} download>
                     <Download className="size-3.5 mr-1" />
                     Download
                   </a>
@@ -94,11 +95,11 @@ function AboutPage() {
                   <div className="size-8 rounded bg-accent/10 flex items-center justify-center text-accent text-xs font-semibold">MSI</div>
                   <div>
                     <div className="text-xs font-semibold">Windows Installer Package</div>
-                    <div className="text-[10px] text-muted-foreground">Version 0.1.0 · x64 · en-US.msi</div>
+                    <div className="text-[10px] text-muted-foreground">Version {version} · x64 · en-US.msi</div>
                   </div>
                 </div>
                 <Button asChild size="sm" variant="outline" className="hover:scale-105 transition-transform" id="btn-download-msi">
-                  <a href="/downloads/AMPHUB_0.1.0_x64_en-US.msi" download>
+                  <a href={`/downloads/AMPHUB_${version}_x64_en-US.msi`} download>
                     <Download className="size-3.5 mr-1" />
                     Download
                   </a>

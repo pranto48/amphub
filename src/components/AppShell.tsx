@@ -53,7 +53,7 @@ export function AppShell() {
               </div>
               <div className="group-data-[collapsible=icon]:hidden">
                 <div className="text-sm font-semibold tracking-tight text-animated-accent">RemoteOps</div>
-                <div className="font-mono text-[10px] text-muted-foreground">v1.0 · secure</div>
+                <div className="font-mono text-[10px] text-muted-foreground">{import.meta.env.VITE_APP_VERSION || "V2.01"} · secure</div>
               </div>
             </div>
           </SidebarHeader>

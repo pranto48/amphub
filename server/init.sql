@@ -124,9 +124,3 @@ INSERT INTO user_roles (user_id, role)
 VALUES ('00000000-0000-0000-0000-000000000002', 'admin')
 ON CONFLICT DO NOTHING;
 
--- Seed a few demo desktop nodes so the dashboard is populated
-INSERT INTO desktop_nodes (name, remote_id, local_ip, os, status, last_seen) VALUES
-  ('Workstation-01', 'RM-7421-A19F', '192.168.1.42',  'windows', 'online',  now()),
-  ('LinuxBox-Dev',   'RM-3308-C71B', '192.168.1.55',  'linux',   'online',  now()),
-  ('FileServer',     'RM-9013-E22D', '192.168.1.10',  'linux',   'offline', now() - interval '2 hours')
-ON CONFLICT DO NOTHING;

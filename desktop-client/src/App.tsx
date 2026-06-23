@@ -108,6 +108,9 @@ function App() {
   const [localPcName, setLocalPcName] = useState("Host-PC");
   const [localIpAddr, setLocalIpAddr] = useState("127.0.0.1");
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editIp, setEditIp] = useState("");
   const [showMovementCursor, setShowMovementCursor] = useState(true);
   const cursorMovementTimeoutRef = useRef<any>(null);
   const [logs, setLogs] = useState<string[]>([
@@ -1233,7 +1236,7 @@ function App() {
 
         {/* Footer */}
         <div className="p-6 border-t border-slate-800/60 bg-slate-950/20 text-xs text-slate-500 font-medium">
-          <div>v2.11.3 • Windows x64</div>
+          <div>{import.meta.env.VITE_APP_VERSION || "V2.01"} • Windows x64</div>
         </div>
       </div>
 
@@ -1263,151 +1266,277 @@ function App() {
           </div>
         </div>
 
+        {/* Background Host Screen Sharing Status Alert Bar */}
+        {connectionStatus === "Connected" && sessionRole === "host" && (
+          <div className="bg-emerald-950/85 border-b border-emerald-900/60 px-8 py-3.5 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3">
+              <span className="flex size-3 items-center justify-center rounded-full bg-emerald-500 relative">
+                <span className="absolute size-3 rounded-full bg-emerald-400 opacity-75 animate-ping"></span>
+              </span>
+              <div className="text-xs font-semibold text-emerald-300">
+                Screen Sharing Active — A remote controller is currently viewing and controlling this desktop.
+              </div>
+            </div>
+            <button
+              onClick={handleDisconnect}
+              className="cursor-pointer px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-extrabold rounded-lg transition-all shadow-md shadow-rose-950/50"
+            >
+              Stop Sharing
+            </button>
+          </div>
+        )}
+
         {/* Dynamic Workspace Container */}
         <div className="flex-1 p-8 overflow-y-auto">
           {activeTab === "remote" && (
             <div className="space-y-8 max-w-6xl mx-auto">
-              {/* Remote Control Connection Form */}
-              {connectionStatus === "Disconnected" && (
-                <div className="bg-slate-900/50 rounded-3xl border border-slate-800 p-8 shadow-2xl relative overflow-hidden backdrop-blur-sm">
-                  <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-rose-500 via-orange-500 to-amber-500"></div>
-                  <div className="max-w-xl">
-                    <h2 className="text-2xl font-black tracking-tight text-white mb-2">Establish Connection Route</h2>
-                    <p className="text-slate-400 text-sm mb-6 leading-relaxed">
-                      Enter the target host client address and connection port to initialize the encrypted WebSockets tunneling route.
-                    </p>
-
-                    <div className="space-y-4">
-                      {/* Host IP and Port in Grid */}
-                      <div className="grid grid-cols-3 gap-4">
-                        <div className="col-span-2">
-                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">AMPHUB Server Address</label>
-                          <input
-                            type="text"
-                            value={hostIp}
-                            onChange={(e) => setHostIp(e.target.value)}
-                            placeholder="e.g. 192.168.1.100"
-                            className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-3 text-sm font-medium text-slate-200 placeholder:text-slate-700 focus:outline-none focus:border-rose-500/50 transition-colors shadow-inner"
-                          />
-                        </div>
+              {/* Remote Control Connection Form & Saved Sessions */}
+              {(connectionStatus === "Disconnected" || (connectionStatus === "Connected" && sessionRole === "host")) && (
+                <>
+                  {/* This Desk and Connect forms side-by-side */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    
+                    {/* This Desk Card */}
+                    <div className="bg-slate-900/50 rounded-3xl border border-slate-800 p-6 shadow-xl relative overflow-hidden backdrop-blur-sm">
+                      <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-emerald-500 to-teal-500"></div>
+                      <h3 className="text-sm font-extrabold text-slate-300 mb-4 flex items-center gap-2">
+                        <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                        This Desk
+                      </h3>
+                      
+                      <div className="space-y-4">
                         <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Signaling Port</label>
-                          <input
-                            type="number"
-                            value={port}
-                            onChange={(e) => setPort(Number(e.target.value))}
-                            placeholder="7766"
-                            className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-3 text-sm font-medium text-slate-200 focus:outline-none focus:border-rose-500/50 transition-colors shadow-inner"
-                          />
+                          <div className="text-[10px] font-bold tracking-wider text-slate-500 uppercase mb-1">Your Address (Client ID)</div>
+                          <div className="flex items-center justify-between bg-slate-950/80 rounded-xl px-4 py-3 border border-slate-800/80 shadow-inner">
+                            <span className="text-xl font-black font-mono tracking-wider text-slate-200 select-all">{myId}</span>
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(myId);
+                                addLog("Copied Client Connection ID to clipboard.");
+                              }}
+                              className="text-rose-400 hover:text-rose-300 font-semibold cursor-pointer flex items-center gap-1 transition-colors text-xs"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                              </svg>
+                              Copy
+                            </button>
+                          </div>
                         </div>
-                      </div>
-
-                      {/* Connection ID */}
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Target Client ID</label>
-                        <div className="relative">
-                          <input
-                            type="text"
-                            value={targetId}
-                            onChange={(e) => setTargetId(e.target.value)}
-                            placeholder="Enter 9-digit remote address (e.g. 2A9-F8C-7E4)"
-                            className="w-full bg-slate-950/80 border border-slate-800 rounded-xl pl-4 pr-12 py-3 text-sm font-medium text-slate-200 placeholder:text-slate-700 focus:outline-none focus:border-rose-500/50 transition-colors shadow-inner font-mono tracking-wider"
-                          />
-                          <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none text-slate-600">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-                            </svg>
+                        
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <div className="text-[10px] font-bold tracking-wider text-slate-500 uppercase mb-1">PC Name</div>
+                            <div className="bg-slate-950/40 rounded-xl px-4 py-2 text-xs font-semibold text-slate-300 border border-slate-850 truncate">
+                              {localPcName}
+                            </div>
+                          </div>
+                          
+                          <div>
+                            <div className="text-[10px] font-bold tracking-wider text-slate-500 uppercase mb-1">Local IP</div>
+                            <div className="bg-slate-950/40 rounded-xl px-4 py-2 text-xs font-semibold text-slate-300 border border-slate-850 truncate">
+                              {localIpAddr}
+                            </div>
                           </div>
                         </div>
                       </div>
+                    </div>
 
-                      {/* Token Section */}
-                      <div>
-                        <div className="flex justify-between items-center mb-1.5">
-                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Security Access JWT Token</label>
-                          <span className="text-[10px] text-slate-600">Acquired from Web UI Port 3355</span>
-                        </div>
-                        <textarea
-                          rows={2}
-                          value={token}
-                          onChange={(e) => setToken(e.target.value)}
-                          disabled={isMock}
-                          placeholder={isMock ? "Not required in Mock Mode. Enable in Settings." : "Paste approved IT Admin session token signed by JWT_SECRET..."}
-                          className={`w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2.5 text-xs font-mono text-slate-300 placeholder:text-slate-700 focus:outline-none focus:border-rose-500/50 transition-colors shadow-inner resize-none ${isMock ? "opacity-40 cursor-not-allowed select-none bg-slate-950" : ""}`}
-                        />
-                      </div>
-
-                      {/* Mock Mode Switch */}
-                      <div className="pt-2 flex items-center justify-between border-t border-slate-800/80 mt-2">
+                    {/* Remote Desk Card (Simplified Connection Form) */}
+                    <div className="bg-slate-900/50 rounded-3xl border border-slate-800 p-6 shadow-xl relative overflow-hidden backdrop-blur-sm">
+                      <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-rose-500 via-orange-500 to-amber-500"></div>
+                      <h3 className="text-sm font-extrabold text-slate-300 mb-4 flex items-center gap-2">
+                        <svg className="w-4 h-4 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                        </svg>
+                        Remote Desk
+                      </h3>
+                      
+                      <div className="space-y-4">
                         <div>
-                          <div className="text-xs font-bold text-slate-300">Enable Simulated Environment</div>
-                          <div className="text-[10px] text-slate-500">Allows demonstration of layout states without backend server docker socket</div>
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Target Client ID</label>
+                          <div className="relative">
+                            <input
+                              type="text"
+                              value={targetId}
+                              onChange={(e) => setTargetId(e.target.value)}
+                              placeholder="Enter 9-digit remote address (e.g. 2A9-F8C-7E4)"
+                              className="w-full bg-slate-950/80 border border-slate-800 rounded-xl pl-4 pr-12 py-3 text-sm font-semibold text-slate-200 placeholder:text-slate-700 focus:outline-none focus:border-rose-500/50 transition-colors shadow-inner font-mono tracking-wider"
+                            />
+                            <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none text-slate-600">
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                              </svg>
+                            </div>
+                          </div>
                         </div>
-                        <button
-                          onClick={() => {
-                            setIsMock(!isMock);
-                            addLog(`Mock mode toggled to: ${!isMock ? "ENABLED" : "DISABLED"}`);
-                          }}
-                          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${isMock ? "bg-rose-600" : "bg-slate-800"}`}
-                        >
-                          <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${isMock ? "translate-x-5" : "translate-x-0"}`}></span>
-                        </button>
-                      </div>
-
-                      {/* Connect Trigger */}
-                      <div className="pt-4">
+                        
                         <button
                           onClick={handleConnect}
                           disabled={!isMock && isSignalingServerReachable === false}
-                          className={`w-full cursor-pointer py-3.5 bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-rose-950/50 hover:shadow-rose-900/60 transform active:scale-[0.99] transition-all flex items-center justify-center gap-2 group ${(!isMock && isSignalingServerReachable === false) ? "opacity-50 cursor-not-allowed" : ""}`}
+                          className={`w-full cursor-pointer py-3 bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-rose-950/50 hover:shadow-rose-900/60 transform active:scale-[0.99] transition-all flex items-center justify-center gap-2 group ${(!isMock && isSignalingServerReachable === false) ? "opacity-50 cursor-not-allowed" : ""}`}
                         >
-                          <svg className="w-5 h-5 transition-transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className="w-4 h-4 transition-transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
                           </svg>
-                          Connect to Target Session
+                          Connect
                         </button>
                       </div>
                     </div>
-                  </div>
-                </div>
-              )}
 
-              {/* Recent Connections */}
-              {connectionStatus === "Disconnected" && recentConnections.length > 0 && (
-                <div className="bg-slate-900/40 rounded-3xl border border-slate-800 p-6 shadow-xl relative overflow-hidden backdrop-blur-sm mt-4">
-                  <h3 className="text-sm font-extrabold text-slate-300 mb-4 flex items-center gap-2">
-                    <svg className="w-4 h-4 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    Recent Connections
-                  </h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                    {recentConnections.map((id) => (
-                      <div 
-                        key={id} 
-                        className="bg-slate-950/80 rounded-xl p-3 border border-slate-800/80 hover:border-rose-500/40 transition-all flex items-center justify-between group"
-                      >
-                        <button
-                          onClick={() => {
-                            setTargetId(id);
-                          }}
-                          className="flex-1 text-left font-mono font-bold text-xs text-slate-300 hover:text-rose-400 transition-colors truncate cursor-pointer"
-                        >
-                          {id}
-                        </button>
-                        <button
-                          onClick={() => removeRecentConnection(id)}
-                          className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-rose-500 transition-all p-1 hover:bg-slate-800 rounded cursor-pointer"
-                          title="Remove connection"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
-                      </div>
-                    ))}
                   </div>
-                </div>
+
+                  {/* Saved Sessions Grid */}
+                  <div className="bg-slate-900/40 rounded-3xl border border-slate-800 p-6 shadow-xl relative overflow-hidden backdrop-blur-sm mt-4">
+                    <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-800/80">
+                      <h3 className="text-sm font-extrabold text-slate-300 flex items-center gap-2">
+                        <svg className="w-4 h-4 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Saved Sessions &amp; Favorites
+                      </h3>
+                      <button
+                        onClick={() => {
+                          const newId = prompt("Enter Client ID:");
+                          if (!newId) return;
+                          const newName = prompt("Enter Custom Name:", `Remote-PC-${newId.slice(0, 3)}`);
+                          const newIp = prompt("Enter Gateway IP Address:", "192.168.9.9");
+                          addSavedSession(newId, newName || "", newIp || "");
+                          addLog(`Added session card: ${newId}`);
+                        }}
+                        className="text-xs text-rose-400 hover:text-rose-300 font-bold flex items-center gap-1 transition-all cursor-pointer"
+                      >
+                        + Add Session
+                      </button>
+                    </div>
+
+                    {savedSessions.length === 0 ? (
+                      <div className="text-center py-8 text-slate-500 text-xs">
+                        No saved sessions. Connect to a remote host or click "+ Add Session" to create one.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                        {[...savedSessions].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)).map((session) => {
+                          const isEditing = editingSessionId === session.id;
+                          return (
+                            <div 
+                              key={session.id} 
+                              className={`bg-slate-950/80 rounded-2xl p-4 border transition-all flex flex-col justify-between min-h-[140px] relative group ${session.pinned ? "border-amber-500/40 hover:border-amber-500/80 shadow shadow-amber-950/20" : "border-slate-800/80 hover:border-rose-500/40"}`}
+                            >
+                              <div className="flex justify-between items-start">
+                                {isEditing ? (
+                                  <div className="space-y-2 w-[85%]">
+                                    <input
+                                      type="text"
+                                      value={editName}
+                                      onChange={(e) => setEditName(e.target.value)}
+                                      className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200"
+                                      placeholder="Session Name"
+                                    />
+                                    <input
+                                      type="text"
+                                      value={editIp}
+                                      onChange={(e) => setEditIp(e.target.value)}
+                                      className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200"
+                                      placeholder="Gateway IP"
+                                    />
+                                  </div>
+                                ) : (
+                                  <div>
+                                    <h4 className="font-extrabold text-sm text-slate-200 truncate pr-6 flex items-center gap-1">
+                                      {session.name}
+                                    </h4>
+                                    <p className="font-mono text-xs font-bold text-slate-400 mt-1 select-all">{session.id}</p>
+                                    <p className="text-[10px] text-slate-500 font-mono mt-0.5">{session.ip}</p>
+                                  </div>
+                                )}
+
+                                <button
+                                  onClick={() => togglePinSession(session.id)}
+                                  className="text-slate-500 hover:text-amber-400 p-1 rounded transition-colors cursor-pointer shrink-0 absolute top-3 right-3"
+                                  title={session.pinned ? "Unfavorite session" : "Favorite session"}
+                                >
+                                  <svg className={`w-4 h-4 ${session.pinned ? "fill-amber-400 text-amber-400" : "text-slate-500 hover:text-amber-400"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.907c.961 0 1.36 1.246.601 1.833l-3.97 2.883a1 1 0 00-.364 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.971-2.883a1 1 0 00-1.18 0l-3.97 2.883c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.364-1.118L2.98 10.124c-.759-.587-.36-1.833.601-1.833h4.907a1 1 0 00.95-.69L11.049 2.927z" />
+                                  </svg>
+                                </button>
+                              </div>
+
+                              <div className="flex justify-between items-center mt-4 pt-2 border-t border-slate-900/60">
+                                {isEditing ? (
+                                  <div className="flex gap-2 w-full justify-end">
+                                    <button
+                                      onClick={() => setEditingSessionId(null)}
+                                      className="px-2.5 py-1 text-[10px] font-bold text-slate-400 hover:text-slate-200 cursor-pointer"
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        updateSavedSession(session.id, editName, editIp);
+                                        setEditingSessionId(null);
+                                        addLog(`Updated session info for ID: ${session.id}`);
+                                      }}
+                                      className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-bold rounded cursor-pointer"
+                                    >
+                                      Save
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <button
+                                        onClick={() => {
+                                          setEditingSessionId(session.id);
+                                          setEditName(session.name);
+                                          setEditIp(session.ip);
+                                        }}
+                                        className="text-slate-500 hover:text-slate-350 p-1 rounded hover:bg-slate-900 transition-all cursor-pointer"
+                                        title="Edit session"
+                                      >
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                        </svg>
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          if (confirm(`Remove saved session ${session.name}?`)) {
+                                            removeSavedSession(session.id);
+                                            addLog(`Removed saved session: ${session.id}`);
+                                          }
+                                        }}
+                                        className="text-slate-500 hover:text-rose-500 p-1 rounded hover:bg-slate-900 transition-all cursor-pointer"
+                                        title="Delete session"
+                                      >
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                      </button>
+                                    </div>
+                                    <button
+                                      onClick={() => {
+                                        setTargetId(session.id);
+                                        setHostIp(session.ip);
+                                        setTimeout(() => {
+                                          handleConnect();
+                                        }, 100);
+                                      }}
+                                      className="cursor-pointer px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-extrabold rounded-lg shadow shadow-rose-950 transition-colors"
+                                    >
+                                      Connect
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
 
               {/* Connecting / Approval Spinner */}
@@ -1677,28 +1806,7 @@ function App() {
                 </div>
               )}
 
-              {connectionStatus === "Connected" && sessionRole === "host" && (
-                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center shadow-2xl relative overflow-hidden backdrop-blur-sm max-w-lg mx-auto">
-                  <div className="absolute top-0 left-0 w-full h-[4px] bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-400 animate-pulse"></div>
-                  <div className="py-8">
-                    <div className="w-24 h-24 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-center justify-center text-emerald-400 mx-auto mb-8 shadow-lg shadow-emerald-950/50">
-                      <svg className="w-12 h-12 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                      </svg>
-                    </div>
-                    <h3 className="text-xl font-extrabold text-white mb-3">AMPHUB sharing you screen.</h3>
-                    <p className="text-slate-400 text-sm mb-8 leading-relaxed">
-                      A remote controller is currently viewing and controlling your desktop. Your actions and screen are encrypted and streamed in real-time.
-                    </p>
-                    <button
-                      onClick={handleDisconnect}
-                      className="cursor-pointer px-6 py-3.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-rose-950 transition-all active:scale-[0.98]"
-                    >
-                      Stop Sharing
-                    </button>
-                  </div>
-                </div>
-              )}
+
             </div>
           )}
 
@@ -1746,6 +1854,22 @@ function App() {
                     </div>
                   </div>
 
+                  {/* Security Access JWT Token Input */}
+                  <div className="pt-2 border-t border-slate-800/40">
+                    <div className="flex justify-between items-center mb-1.5">
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Security Access JWT Token</label>
+                      <span className="text-[10px] text-slate-600">Acquired from Web UI Port 3355</span>
+                    </div>
+                    <textarea
+                      rows={3}
+                      value={token}
+                      onChange={(e) => setToken(e.target.value)}
+                      disabled={isMock}
+                      placeholder={isMock ? "Not required in Mock Mode." : "Paste approved IT Admin session token signed by JWT_SECRET..."}
+                      className={`w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2.5 text-xs font-mono text-slate-300 placeholder:text-slate-700 focus:outline-none focus:border-rose-500/50 transition-colors shadow-inner resize-none ${isMock ? "opacity-40 cursor-not-allowed select-none bg-slate-950" : ""}`}
+                    />
+                  </div>
+
                   {/* Signaling Server Reachability status */}
                   <div className="flex justify-between items-center text-xs pt-2 border-t border-slate-800/40">
                     <span className="text-slate-400 font-semibold">Signaling Server Probe State:</span>
@@ -1779,6 +1903,26 @@ function App() {
                       <span
                         className="inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform"
                         style={{ transform: autostartEnabled ? 'translateX(16px)' : 'translateX(4px)' }}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Mock Mode Switch */}
+                  <div className="flex justify-between items-center text-xs pt-3.5 border-t border-slate-800/40">
+                    <div>
+                      <span className="text-slate-400 font-semibold block">Enable Simulated Environment</span>
+                      <span className="text-[10px] text-slate-500">Allows demonstration of layout states without backend server docker socket</span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setIsMock(!isMock);
+                        addLog(`Mock mode toggled to: ${!isMock ? "ENABLED" : "DISABLED"}`);
+                      }}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none cursor-pointer ${isMock ? "bg-rose-600" : "bg-slate-800"}`}
+                    >
+                      <span
+                        className="inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform"
+                        style={{ transform: isMock ? 'translateX(16px)' : 'translateX(4px)' }}
                       />
                     </button>
                   </div>
