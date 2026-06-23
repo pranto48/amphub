@@ -32,6 +32,7 @@ use streamer::{
     StreamerState,
     start_desktop_stream,
     stop_desktop_stream,
+    set_active_screen_index,
 };
 
 #[derive(serde::Deserialize)]
@@ -149,11 +150,41 @@ fn simulate_input(action: InputAction) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(serde::Serialize)]
+struct ScreenInfo {
+    index: usize,
+    name: String,
+    width: u32,
+    height: u32,
+}
+
 #[tauri::command]
-fn capture_screen() -> Result<String, String> {
+fn get_available_screens() -> Result<Vec<ScreenInfo>, String> {
     match Screen::all() {
         Ok(screens) => {
-            if let Some(screen) = screens.first() {
+            let mut list = Vec::new();
+            for (idx, screen) in screens.iter().enumerate() {
+                let info = screen.display_info;
+                list.push(ScreenInfo {
+                    index: idx,
+                    name: format!("Screen {} ({}x{})", idx + 1, info.width, info.height),
+                    width: info.width as u32,
+                    height: info.height as u32,
+                });
+            }
+            Ok(list)
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn capture_screen(screen_index: Option<usize>) -> Result<String, String> {
+    match Screen::all() {
+        Ok(screens) => {
+            let idx = screen_index.unwrap_or(0);
+            let screen = screens.get(idx).or_else(|| screens.first());
+            if let Some(screen) = screen {
                 match screen.capture() {
                     Ok(image) => {
                         let mut png_bytes = Vec::new();
@@ -465,6 +496,7 @@ pub fn run() {
             get_local_info,
             simulate_input,
             capture_screen,
+            get_available_screens,
             get_clipboard,
             set_clipboard,
             get_connection_status,
@@ -474,6 +506,7 @@ pub fn run() {
             ping_signaling_server,
             start_desktop_stream,
             stop_desktop_stream,
+            set_active_screen_index,
             get_autostart_status,
             set_autostart_status,
             show_app_window,

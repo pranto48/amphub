@@ -111,6 +111,14 @@ function App() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editIp, setEditIp] = useState("");
+  const [availableScreens, setAvailableScreens] = useState<any[]>([]);
+  const [activeScreenIndex, setActiveScreenIndex] = useState(0);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<any>(null);
+  const canvasRecordingIntervalRef = useRef<any>(null);
   const [showMovementCursor, setShowMovementCursor] = useState(true);
   const cursorMovementTimeoutRef = useRef<any>(null);
   const [logs, setLogs] = useState<string[]>([
@@ -169,7 +177,7 @@ function App() {
     }
     // First, try native Chromium getDisplayMedia which is auto-approved via additionalBrowserArgs
     try {
-      if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+      if (!isTauri && navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
         addLog("[WebRTC] Requesting native display media stream...");
         const stream = await navigator.mediaDevices.getDisplayMedia({
           video: {
@@ -199,7 +207,7 @@ function App() {
     const updateCanvas = async () => {
       try {
         if (isTauri) {
-          const b64 = await safeInvoke<string>("capture_screen");
+          const b64 = await safeInvoke<string>("capture_screen", { screenIndex: activeScreenIndex });
           img.src = `data:image/png;base64,${b64}`;
           img.onload = () => {
             ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
@@ -586,6 +594,17 @@ function App() {
           setIsFullScreen(true);
           addLog("[View Mode] Automatically entering full screen session.");
         }
+        // Query available screens on host
+        setTimeout(() => {
+          addLog("[CONTROLLER] Querying host screens...");
+          safeInvoke("send_signaling_message", {
+            message: JSON.stringify({
+              type: "query_screens",
+              target: targetId,
+              sender: myId
+            })
+          }).catch(err => addLog(`Failed to query host screens: ${err}`));
+        }, 1000);
       } else if (sessionRole === "host") {
         // Host role: capture local screen and stream tracks to the controller.
         addLog("[HOST] Role confirmed by server. Starting local screen capture loop for streaming.");
@@ -594,6 +613,9 @@ function App() {
           .catch(err => addLog(`[HOST] Failed to start streamer loop: ${err}`));
       }
     } else if (connectionStatus === "Disconnected") {
+      stopSessionRecording();
+      setAvailableScreens([]);
+      setActiveScreenIndex(0);
       setSessionRole(null);
       safeInvoke("stop_desktop_stream")
         .then(() => addLog("Desktop streamer capture loop stopped."))
@@ -673,6 +695,44 @@ function App() {
                 safeInvoke("show_app_window").catch((err) => {
                   console.error("Failed to restore app window on access request:", err);
                 });
+              }
+            } else if (data.type === "query_screens") {
+              addLog(`[Screens Query] Controller requested list of screens.`);
+              if (isTauri) {
+                safeInvoke<any[]>("get_available_screens").then(screens => {
+                  safeInvoke("send_signaling_message", {
+                    message: JSON.stringify({
+                      type: "screens_list",
+                      target: data.sender,
+                      sender: myId,
+                      screens: screens
+                    })
+                  });
+                }).catch(err => addLog(`Failed to query screens: ${err}`));
+              } else {
+                safeInvoke("send_signaling_message", {
+                  message: JSON.stringify({
+                    type: "screens_list",
+                    target: data.sender,
+                    sender: myId,
+                    screens: [
+                      { index: 0, name: "Screen 1 (1920x1080)" },
+                      { index: 1, name: "Screen 2 (1280x720)" }
+                    ]
+                  })
+                });
+              }
+            } else if (data.type === "screens_list") {
+              addLog(`[Screens List] Received ${data.screens?.length || 0} screens from host.`);
+              setAvailableScreens(data.screens || []);
+            } else if (data.type === "select_screen") {
+              const idx = Number(data.index);
+              addLog(`[Screen Switch] Controller requested switch to screen index: ${idx}`);
+              setActiveScreenIndex(idx);
+              if (isTauri) {
+                safeInvoke("set_active_screen_index", { index: idx }).catch(err => 
+                  addLog(`Failed to set active screen index in Rust: ${err}`)
+                );
               }
             } else if (data.type === "offer") {
               addLog(`[WebRTC] Received SDP Offer from controller: ${data.sender}`);
@@ -899,6 +959,9 @@ function App() {
 
   const handleDisconnect = async () => {
     clearPolling();
+    stopSessionRecording();
+    setAvailableScreens([]);
+    setActiveScreenIndex(0);
     try {
       await safeInvoke("disconnect_signaling");
       setConnectionStatus("Disconnected");
@@ -908,6 +971,116 @@ function App() {
     } catch (e: any) {
       addLog(`Failed to close connection cleanly: ${e}`);
     }
+  };
+
+  const formatTime = (secs: number) => {
+    const m = Math.floor(secs / 60).toString().padStart(2, '0');
+    const s = (secs % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
+
+  const startSessionRecording = () => {
+    let streamToRecord: MediaStream | null = null;
+    if (remoteStreamObject) {
+      streamToRecord = remoteStreamObject;
+      addLog("[Recording] Found active WebRTC remote stream. Initiating recording...");
+    } else if (remoteScreen) {
+      addLog("[Recording] WebRTC stream not active. Initializing canvas-drawn image recording fallback...");
+      const canvas = document.createElement("canvas");
+      canvas.width = 1920;
+      canvas.height = 1080;
+      const ctx = canvas.getContext("2d");
+      const img = new Image();
+      
+      const drawInterval = setInterval(() => {
+        if (remoteScreen) {
+          img.src = remoteScreen.startsWith("iVBOR") 
+            ? `data:image/png;base64,${remoteScreen}` 
+            : `data:image/jpeg;base64,${remoteScreen}`;
+          img.onload = () => {
+            ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+          };
+        }
+      }, 100);
+      
+      canvasRecordingIntervalRef.current = drawInterval;
+      
+      const canvasStream = (canvas as any).captureStream(10);
+      streamToRecord = canvasStream;
+    }
+
+    if (!streamToRecord) {
+      addLog("[Recording] Warning: No active screen stream to record.");
+      alert("Cannot record: Screen stream is not active yet.");
+      return;
+    }
+
+    const chunks: Blob[] = [];
+    let mediaRecorder: MediaRecorder;
+    try {
+      mediaRecorder = new MediaRecorder(streamToRecord, {
+        mimeType: "video/webm;codecs=vp8"
+      });
+    } catch (err) {
+      addLog(`[Recording] codecs=vp8 fallback: ${err}`);
+      mediaRecorder = new MediaRecorder(streamToRecord);
+    }
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) {
+        chunks.push(e.data);
+      }
+    };
+
+    mediaRecorder.onstop = () => {
+      if (canvasRecordingIntervalRef.current) {
+        clearInterval(canvasRecordingIntervalRef.current);
+        canvasRecordingIntervalRef.current = null;
+      }
+      
+      const blob = new Blob(chunks, { type: "video/webm" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `AMPHUB_Recording_${targetId || "session"}_${new Date().toISOString().replace(/[:.]/g, "-")}.webm`;
+      a.click();
+      URL.revokeObjectURL(url);
+      addLog("[Recording] Recording saved. Check your local downloads folder.");
+    };
+
+    mediaRecorderRef.current = mediaRecorder;
+    recordedChunksRef.current = chunks;
+    mediaRecorder.start(1000);
+    setIsRecording(true);
+    setRecordingSeconds(0);
+    
+    recordingTimerRef.current = setInterval(() => {
+      setRecordingSeconds(prev => prev + 1);
+    }, 1000);
+  };
+
+  const stopSessionRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    setIsRecording(false);
+  };
+
+  const selectScreen = (index: number) => {
+    setActiveScreenIndex(index);
+    addLog(`Requesting switch to screen monitor: ${index + 1}`);
+    safeInvoke("send_signaling_message", {
+      message: JSON.stringify({
+        type: "select_screen",
+        target: targetId,
+        sender: myId,
+        index: index
+      })
+    }).catch(err => addLog(`Failed to send select_screen message: ${err}`));
   };
 
   const startScreenSharing = async () => {
@@ -1583,14 +1756,34 @@ function App() {
                   {/* Remote Window Workspace */}
                   <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col">
                     {/* Viewport Toolbar */}
-                    <div className="bg-slate-950 px-5 py-3 border-b border-slate-800 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full bg-rose-500"></span>
-                        <span className="w-3 h-3 rounded-full bg-amber-500"></span>
-                        <span className="w-3 h-3 rounded-full bg-emerald-500"></span>
-                        <span className="ml-3 text-xs font-extrabold text-slate-300 select-none tracking-wide">
-                          REMOTE CLIENT SESSION: {targetId || "AMP-SIMULATED-DEV"}
-                        </span>
+                    <div className="bg-slate-950 px-5 py-3 border-b border-slate-800 flex items-center justify-between flex-wrap gap-3">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5 mr-2">
+                          <span className="w-3 h-3 rounded-full bg-rose-500"></span>
+                          <span className="w-3 h-3 rounded-full bg-amber-500"></span>
+                          <span className="w-3 h-3 rounded-full bg-emerald-500"></span>
+                          <span className="ml-3 text-xs font-extrabold text-slate-300 select-none tracking-wide">
+                            REMOTE CLIENT SESSION: {targetId || "AMP-SIMULATED-DEV"}
+                          </span>
+                        </div>
+                        {availableScreens.length > 1 && (
+                          <div className="flex items-center gap-1 bg-slate-900 px-2 py-1 rounded-lg border border-slate-800">
+                            <span className="text-[9px] text-slate-500 font-extrabold uppercase tracking-wide mr-1.5 select-none">Monitors:</span>
+                            {availableScreens.map((scr: any) => (
+                              <button
+                                key={scr.index}
+                                onClick={() => selectScreen(scr.index)}
+                                className={`px-2 py-0.5 text-[9px] font-extrabold rounded transition-all cursor-pointer ${
+                                  activeScreenIndex === scr.index
+                                    ? "bg-rose-600 text-white shadow-sm"
+                                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+                                }`}
+                              >
+                                Screen {scr.index + 1}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       
                       {/* Connection Actions */}
@@ -1620,7 +1813,7 @@ function App() {
                         <button 
                           onClick={() => {
                             if (isMock) {
-                              safeInvoke<string>("capture_screen").then((b64) => {
+                              safeInvoke<string>("capture_screen", { screenIndex: activeScreenIndex }).then((b64) => {
                                 addLog("Captured remote monitor screen.");
                                 setRemoteScreen(b64);
                               });
@@ -1635,6 +1828,19 @@ function App() {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
                           </svg>
+                        </button>
+                        <button
+                          onClick={isRecording ? stopSessionRecording : startSessionRecording}
+                          title={isRecording ? `Stop Session Recording (${formatTime(recordingSeconds)})` : "Start Session Recording"}
+                          className={`p-1.5 rounded-md border transition-all cursor-pointer flex items-center gap-1.5 text-xs font-bold ${
+                            isRecording
+                              ? "bg-rose-950 border-rose-800 text-rose-400 animate-pulse"
+                              : "bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-rose-400 border-slate-800"
+                          }`}
+                        >
+                          <span className={`w-2 h-2 rounded-full bg-rose-500 ${isRecording ? "animate-ping" : ""}`}></span>
+                          {isRecording && <span className="font-mono text-[9px]">{formatTime(recordingSeconds)}</span>}
+                          {!isRecording && <span className="text-[9px] uppercase font-extrabold tracking-wider px-0.5">Rec</span>}
                         </button>
                         <button 
                           onClick={handleDisconnect}
@@ -2480,9 +2686,25 @@ function App() {
             </p>
             <div className="flex gap-3 justify-end">
               <button
-                onClick={() => {
+                onClick={async () => {
+                  const ip = incomingRequest.ip;
+                  const reqId = incomingRequest.requestId;
                   setIncomingRequest(null);
-                  addLog("Denied remote access request from " + incomingRequest.ip);
+                  addLog("Denied remote access request from " + ip);
+                  if (!isMock && reqId) {
+                    try {
+                      await safeInvoke("send_signaling_message", {
+                        message: JSON.stringify({
+                          type: "session_rejected",
+                          requestId: reqId,
+                          clientId: myId
+                        })
+                      });
+                      addLog("Rejection notification dispatched to signaling gateway.");
+                    } catch (err) {
+                      addLog(`Failed to dispatch rejection: ${err}`);
+                    }
+                  }
                 }}
                 className="cursor-pointer px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all"
               >

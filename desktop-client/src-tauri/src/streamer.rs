@@ -9,6 +9,7 @@ use super::SignalingState;
 pub struct StreamerState {
     pub is_streaming: Arc<Mutex<bool>>,
     pub stop_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+    pub active_screen_index: Arc<Mutex<usize>>,
 }
 
 impl StreamerState {
@@ -16,8 +17,19 @@ impl StreamerState {
         Self {
             is_streaming: Arc::new(Mutex::new(false)),
             stop_tx: Arc::new(Mutex::new(None)),
+            active_screen_index: Arc::new(Mutex::new(0)),
         }
     }
+}
+
+#[tauri::command]
+pub async fn set_active_screen_index(
+    index: usize,
+    state: tauri::State<'_, StreamerState>,
+) -> Result<(), String> {
+    let mut active = state.active_screen_index.lock().await;
+    *active = index;
+    Ok(())
 }
 
 #[tauri::command]
@@ -37,6 +49,7 @@ pub async fn start_desktop_stream(
 
     let is_streaming_clone = Arc::clone(&state.is_streaming);
     let ws_tx_clone = Arc::clone(&sig_state.ws_tx);
+    let active_screen_index_clone = Arc::clone(&state.active_screen_index);
 
     tokio::spawn(async move {
         println!("[STREAMER] Starting WebRTC screen capture loop...");
@@ -46,10 +59,16 @@ pub async fn start_desktop_stream(
                 break;
             }
 
+            let screen_idx = {
+                let active = active_screen_index_clone.lock().await;
+                *active
+            };
+
             // Capture screen
             match Screen::all() {
                 Ok(screens) => {
-                    if let Some(screen) = screens.first() {
+                    let screen = screens.get(screen_idx).or_else(|| screens.first());
+                    if let Some(screen) = screen {
                         match screen.capture() {
                             Ok(image) => {
                                 let mut jpeg_bytes = Vec::new();

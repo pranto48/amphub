@@ -1838,6 +1838,62 @@ signalingServer.on("upgrade", async (req, socket, head) => {
           activeClients.delete(myId);
           broadcast({ table: "ConnectedClients", type: "UPDATE" });
         });
+
+        ws.on("message", async (data) => {
+          try {
+            const messageString = data.toString();
+            let messageObj = null;
+            try {
+              messageObj = JSON.parse(messageString);
+            } catch (e) {
+              // ignore
+            }
+
+            if (messageObj) {
+              if (messageObj.type === "session_rejected") {
+                const { requestId } = messageObj;
+                console.log(`[STANDBY] Host rejected session request: ${requestId}`);
+                try {
+                  const updated = await prisma.remoteSession.update({
+                    where: { id: requestId },
+                    data: { status: "DENIED" }
+                  });
+                  const updatedRow = {
+                    id: updated.id,
+                    client_id: updated.clientId,
+                    status: updated.status,
+                    metadata: updated.metadata ? JSON.parse(updated.metadata) : {},
+                    requested_at: updated.requestedAt,
+                    approved_at: updated.approvedAt,
+                    expires_at: updated.expiresAt,
+                    token: updated.token
+                  };
+                  broadcast({ table: "RemoteSessions", type: "UPDATE", row: updatedRow });
+                  
+                  // Notify waiting controller
+                  for (const peer of signalingSockets) {
+                    if (peer.requestId === requestId && peer.isController) {
+                      peer.send(JSON.stringify({ type: "error", error: "Session request denied by host" }));
+                    }
+                  }
+                } catch (dbErr) {
+                  console.error("[STANDBY] Failed to update denied session in DB:", dbErr);
+                }
+              } else if (["screens_list", "select_screen"].includes(messageObj.type)) {
+                // Forward screens list or screen switch messages to peer in the same session
+                const targetClientId = messageObj.target;
+                if (targetClientId) {
+                  const targetWs = activeClients.get(targetClientId);
+                  if (targetWs) {
+                    targetWs.send(messageString);
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            console.error("[STANDBY MESSAGE ERROR]", e);
+          }
+        });
       });
       return;
     }
