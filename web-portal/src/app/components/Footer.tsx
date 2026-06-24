@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Monitor, Heart, Github, Globe } from "lucide-react";
+import { Monitor, Heart, Globe } from "lucide-react";
 
 export default function Footer() {
   return (

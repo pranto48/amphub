@@ -3,8 +3,8 @@ import { getFirestore } from "firebase/firestore";
 
 const firebaseConfigEnv = process.env.NEXT_PUBLIC_FIREBASE_CONFIG;
 
-let app;
-let db;
+let app: any;
+let db: any;
 
 const mockDb = {
   // A mock firestore database object to prevent runtime crashes when Firebase isn't configured

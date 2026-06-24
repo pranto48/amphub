@@ -1,4 +1,4 @@
-import { Zap, Shield, Db, Database, Key, Clock, Monitor, UserCheck, Smartphone } from "lucide-react";
+import { Zap, Shield, Database, Key, Clock, Monitor, UserCheck } from "lucide-react";
 
 export default function Features() {
   const technicalFeatures = [

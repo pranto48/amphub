@@ -82,19 +82,9 @@ export default function Benefits() {
                 <RefreshCw className="h-10 w-10 text-brand-cyan" />
               </div>
             </div>
-          </div>
         </div>
       </div>
-
-      <style jsx global>{`
-        @keyframes spin-slow {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        .animate-spin-slow {
-          animation: spin-slow 20s linear infinite;
-        }
-      `}</style>
     </div>
+  </div>
   );
 }
