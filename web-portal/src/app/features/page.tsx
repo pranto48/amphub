@@ -1,4 +1,10 @@
 import { Zap, Shield, Database, Key, Clock, Monitor, UserCheck } from "lucide-react";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "AMPHub Core Technical Features & Traversal Architecture",
+  description: "Explore the secure architecture of AMPHub: Rust native screen captures, WebRTC P2P streams, SQLite storage, MFA security keys, and multi-monitor setup tools.",
+};
 
 export default function Features() {
   const technicalFeatures = [

@@ -1,4 +1,10 @@
 import { ShieldCheck, HardDrive, CheckCircle2, Lock, EyeOff, RefreshCw } from "lucide-react";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "AMPHub Compliance, GDPR & HIPAA Privacy Benefits",
+  description: "Understand the corporate privacy benefits of AMPHub: full GDPR compliance, HIPAA alignment readiness, and absolute local control over session logs.",
+};
 
 export default function Benefits() {
   const compliancePoints = [

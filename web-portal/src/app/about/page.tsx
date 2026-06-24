@@ -1,6 +1,12 @@
 import Link from "next/link";
 import Image from "next/image";
 import { Users, Globe, Mail, Shield, CheckCircle } from "lucide-react";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "About Arif Mahmud & IT Support BD Team",
+  description: "Learn about the creators, lead architect Arif Mahmud, and the IT Support BD systems engineers behind the open-source secure remote desktop gateway.",
+};
 
 export default function About() {
   return (
