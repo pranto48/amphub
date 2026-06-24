@@ -15,7 +15,7 @@ export default function Home() {
       <section className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-12 pb-24 md:pt-20 md:pb-32 text-center">
         <div className="max-w-4xl mx-auto space-y-8">
           {/* Release Badge */}
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/[0.03] border border-white/10 backdrop-blur-md">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/[0.03] border border-white/10 backdrop-blur-md animate-fade-in-up">
             <span className="flex h-2 w-2 rounded-full bg-brand-cyan animate-pulse"></span>
             <span className="text-[11px] font-semibold text-slate-300 uppercase tracking-widest">
               Version 2.08 Release — Self-Hosted Traversal
@@ -23,7 +23,7 @@ export default function Home() {
           </div>
 
           {/* Main Heading */}
-          <h1 className="text-4xl sm:text-6xl font-extrabold text-white tracking-tight leading-[1.1] md:leading-[1.15]">
+          <h1 className="text-4xl sm:text-6xl font-extrabold text-white tracking-tight leading-[1.1] md:leading-[1.15] animate-fade-in-up delay-100">
             Secure Open-Source <br className="hidden sm:inline" />
             <span className="bg-gradient-to-r from-brand-cyan via-brand-purple to-brand-emerald bg-clip-text text-transparent">
               Self-Hosted Remote Desktop
@@ -31,12 +31,12 @@ export default function Home() {
           </h1>
 
           {/* Subtitle */}
-          <p className="text-lg sm:text-xl text-slate-400 max-w-3xl mx-auto leading-relaxed">
+          <p className="text-lg sm:text-xl text-slate-400 max-w-3xl mx-auto leading-relaxed animate-fade-in-up delay-200">
             Switch from TeamViewer, AnyDesk, and Splashtop to AMPHub for a secure and reliable remote desktop experience with your own self-hosted servers. Take full control of your telemetry and sovereignty.
           </p>
 
           {/* CTAs */}
-          <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
+          <div className="flex flex-col sm:flex-row justify-center items-center gap-4 animate-fade-in-up delay-300">
             <Link
               href="/download"
               className="w-full sm:w-auto inline-flex items-center justify-center px-6 py-3.5 rounded-xl text-sm font-bold text-black bg-brand-cyan hover:bg-brand-cyan/90 transition-all hover:scale-[1.02] shadow-[0_0_20px_rgba(6,182,212,0.25)] gap-2 group"
@@ -53,7 +53,7 @@ export default function Home() {
         </div>
 
         {/* Scaffold Interactive Terminal */}
-        <div className="mt-16 md:mt-24">
+        <div className="mt-16 md:mt-24 animate-fade-in-up delay-400">
           <DockerInstall />
         </div>
       </section>

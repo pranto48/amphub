@@ -73,38 +73,71 @@ export default function WhyAmphub() {
         </div>
 
         {/* Feature Comparison Matrix Table */}
-        <div className="mb-24 overflow-x-auto">
-          <div className="min-w-[620px] max-w-5xl mx-auto glass-panel rounded-2xl border border-white/5 overflow-hidden">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-[#0f111a] border-b border-white/5 text-xs text-slate-400 font-semibold uppercase tracking-wider">
-                  <th className="px-6 py-4">Capability</th>
-                  <th className="px-6 py-4 text-brand-cyan">AMPHub</th>
-                  <th className="px-6 py-4">TeamViewer</th>
-                  <th className="px-6 py-4">AnyDesk</th>
-                  <th className="px-6 py-4">Splashtop</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5 text-sm">
-                {features.map((feature, idx) => (
-                  <tr key={idx} className="hover:bg-white/[0.01] transition-colors">
-                    <td className="px-6 py-4 text-white font-medium">{feature.name}</td>
-                    <td className="px-6 py-4 text-brand-emerald">
-                      <Check className="h-5 w-5 bg-brand-emerald/10 p-0.5 rounded" />
-                    </td>
-                    <td className="px-6 py-4 text-slate-500">
-                      <X className="h-4 w-4" />
-                    </td>
-                    <td className="px-6 py-4 text-slate-500">
-                      <X className="h-4 w-4" />
-                    </td>
-                    <td className="px-6 py-4 text-slate-500">
-                      <X className="h-4 w-4" />
-                    </td>
+        <div className="mb-24 animate-fade-in-up">
+          {/* Desktop Table View */}
+          <div className="hidden md:block overflow-x-auto">
+            <div className="max-w-5xl mx-auto glass-panel rounded-2xl border border-white/5 overflow-hidden">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-[#0f111a] border-b border-white/5 text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                    <th className="px-6 py-4">Capability</th>
+                    <th className="px-6 py-4 text-brand-cyan">AMPHub</th>
+                    <th className="px-6 py-4">TeamViewer</th>
+                    <th className="px-6 py-4">AnyDesk</th>
+                    <th className="px-6 py-4">Splashtop</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-white/5 text-sm">
+                  {features.map((feature, idx) => (
+                    <tr key={idx} className="hover:bg-white/[0.01] transition-colors">
+                      <td className="px-6 py-4 text-white font-medium">{feature.name}</td>
+                      <td className="px-6 py-4 text-brand-emerald">
+                        <Check className="h-5 w-5 bg-brand-emerald/10 p-0.5 rounded" />
+                      </td>
+                      <td className="px-6 py-4 text-slate-500">
+                        <X className="h-4 w-4" />
+                      </td>
+                      <td className="px-6 py-4 text-slate-500">
+                        <X className="h-4 w-4" />
+                      </td>
+                      <td className="px-6 py-4 text-slate-500">
+                        <X className="h-4 w-4" />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Mobile Cards List View */}
+          <div className="md:hidden space-y-4">
+            <div className="text-xs font-semibold text-slate-500 uppercase tracking-widest text-left mb-2">Capability Matrix</div>
+            {features.map((feature, idx) => (
+              <div key={idx} className="glass-panel p-5 rounded-xl border border-white/5 text-left space-y-3">
+                <div className="text-sm font-bold text-white">{feature.name}</div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="flex items-center gap-2 text-slate-300">
+                    <span className="font-semibold text-brand-cyan">AMPHub:</span>
+                    <span className="text-brand-emerald font-medium flex items-center gap-1">
+                      <Check className="h-4 w-4 bg-brand-emerald/10 p-0.5 rounded" /> Included
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-slate-500">
+                    <span>TeamViewer:</span>
+                    <span className="flex items-center gap-1"><X className="h-3 w-3" /> No</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-slate-500">
+                    <span>AnyDesk:</span>
+                    <span className="flex items-center gap-1"><X className="h-3 w-3" /> No</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-slate-500">
+                    <span>Splashtop:</span>
+                    <span className="flex items-center gap-1"><X className="h-3 w-3" /> No</span>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 
